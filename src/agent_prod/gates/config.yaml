@@ -1,0 +1,68 @@
+# ── Quality Gates Configuration ──────────────────────────────────
+# Phase 1: 阈值外部化 + 基础设施地址配置 ✅ 已完成
+# Phase 2: 去掉以下注释即可接入真实基础设施
+#
+# ╔══════════════════════════════════════════════════════════════╗
+# ║  生产模式：Phase 2 ✅ 已启用                                  ║
+# ║  1. observability.otel.enabled: true           ✅ OTel 真实追踪║
+# ║  2. observability.metrics.provider: "prometheus" ✅ Prometheus ║
+# ║  3. storage.backend: "postgres"                ✅ PostgreSQL  ║
+# ╚══════════════════════════════════════════════════════════════╝
+
+gates:
+  gate1:
+    execution_time_tolerance: 1.2        # 执行时间超出预算的容忍系数
+    token_tolerance: 1.1                 # Token 超出预算的容忍系数
+    consecutive_failures_before_escalation: 3
+    circuit_breaker_cooldown_seconds: 60.0
+
+  gate3:
+    regress_pct: 0.95                     # 不低于基线的 95%
+    perf_degradation_limit: 0.05          # 性能退化不超过 5%
+    repeatability_threshold: 0.1
+    repeatability_runs: 3
+    unstable_retry_count: 5
+
+  gate4:
+    error_rate_increase: 0.01            # 灰度组 vs 基线组，错误率上升不超过 1%
+    latency_increase: 0.10               # P95 延迟上升不超过 10%
+    resource_increase: 0.15              # 资源消耗上升不超过 15%
+    stable_period_seconds: 60            # 每个阶梯观察期（生产环境分钟级）
+    stages:
+      1: {traffic_pct: 1,  observe_cycles: 2, label: "1%"}
+      2: {traffic_pct: 10, observe_cycles: 4, label: "10%"}
+      3: {traffic_pct: 50, observe_cycles: 6, label: "50%"}
+      4: {traffic_pct: 100, observe_cycles: 0, label: "100%"}
+
+storage:
+  # backend: file | postgres | memory
+  backend: "postgres"                    # Phase 2: 生产模式 PostgreSQL
+  file_path: "/var/lib/quality_gates/improvements.json"
+  postgres:
+    dsn: "postgresql://quality_gates:quality_gates@localhost:5432/quality_gates"
+    pool_size: 5
+
+observability:
+  # OpenTelemetry
+  otel:
+    endpoint: "http://localhost:4317"     # OTLP gRPC endpoint
+    service_name: "loop-engineer"
+    enabled: true                         # Phase 2: 生产模式 ON
+    jaeger_url: "http://localhost:16686"  # Jaeger Query API
+  # Metrics (Prometheus)
+  metrics:
+    provider: "prometheus"                # Phase 2: 真实 Prometheus 查询
+    prometheus_url: "http://localhost:9090"
+    timeout_seconds: 5.0
+  # Feature Flags
+  unleash:
+    url: "http://localhost:4242"
+    api_token: "default:development.unleash-insecure-api-token"
+    environment: "production"
+    app_name: "quality-gates"
+
+logging:
+  format: "json"                          # json | console
+  level: "INFO"
+  output: "stdout"                        # stdout | file
+  file_path: "/var/log/quality_gates/gates.log"

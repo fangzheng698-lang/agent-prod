@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agent-prod"
+version = "0.2.0"
+description = "Enterprise-grade AI agent framework — plug-in quality gates, causal attribution, data flywheel, adaptive thresholds"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.11"
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+dependencies = [
+    "click>=8.0",
+    "fastapi>=0.100",
+    "uvicorn[standard]>=0.23",
+    "pydantic>=2.0",
+    "pydantic-settings>=2.0",
+    "PyYAML>=6.0",
+    "structlog>=23.0",
+]
+
+[project.optional-dependencies]
+postgres   = ["asyncpg>=0.28", "sqlalchemy[asyncio]>=2.0"]
+prometheus = ["prometheus-client>=0.19"]
+tracing    = ["opentelemetry-exporter-otlp-proto-grpc>=1.20"]
+unleash    = ["UnleashClient>=5.0"]
+dev        = ["pytest>=7.0", "pytest-asyncio>=0.21", "httpx>=0.27"]
+all        = ["agent-prod[postgres,prometheus,tracing,unleash,dev]"]
+
+[project.scripts]
+agent-prod = "agent_prod.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/example/agent-prod"
+Documentation = "https://github.com/example/agent-prod"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["agent_prod", "agent_prod.*", "tools", "tools.*", "skills", "skills.*"]

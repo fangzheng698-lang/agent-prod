@@ -1,0 +1,18 @@
+# Phase 2: Prometheus 抓取配置
+# Pushgateway: 测试脚本推送指标 → Prometheus 抓取 → Gate4 查询
+
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  # Pushgateway — 临时指标（quality gates 测试推送）
+  - job_name: 'pushgateway'
+    honor_labels: true
+    static_configs:
+      - targets: ['pushgateway:9091']
+
+  # Jaeger — 自监控指标
+  - job_name: 'jaeger'
+    static_configs:
+      - targets: ['jaeger:14269']
