@@ -10,10 +10,9 @@ Phase 5.2: Threshold Heatmap — 阈值热力图
 """
 from __future__ import annotations
 
-import asyncio
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Awaitable
-
+from typing import Any
 
 EvaluatorFn = Callable[
     [dict[str, int]],
@@ -75,7 +74,7 @@ class HeatmapGrid:
         lines = []
         # 标题
         lines.append(f"Heatmap: {self.x_label} × {self.y_label}")
-        lines.append(f"  Values: pass_rate (0.0 = all rejected, 1.0 = all passed)")
+        lines.append("  Values: pass_rate (0.0 = all rejected, 1.0 = all passed)")
         lines.append("")
 
         # x 轴标签（列头）

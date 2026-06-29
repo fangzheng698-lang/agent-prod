@@ -8,10 +8,10 @@
     ml.add_user("what is 42?")
     ml.add_assistant("The answer is 42")
     ml.add_tool_result("search", "Found answer: 42")
-    
+
     if ml.estimate_tokens() > 100_000:
         ml.trim_to_budget(100_000)
-    
+
     messages = ml.to_dict_list()  # or ml.get_messages()
 """
 
@@ -139,7 +139,7 @@ class MessageLifecycle:
     # ── 工厂 ──
 
     @classmethod
-    def from_dict_list(cls, messages: list[dict[str, Any]]) -> "MessageLifecycle":
+    def from_dict_list(cls, messages: list[dict[str, Any]]) -> MessageLifecycle:
         """从持久化的消息列表重建。"""
         ml = cls()
         for msg in messages:

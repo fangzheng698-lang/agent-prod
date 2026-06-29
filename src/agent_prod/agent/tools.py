@@ -1,8 +1,8 @@
 """工具注册和执行。纯 Python，无框架依赖。"""
 
 from __future__ import annotations
+
 import asyncio
-from typing import Any, Callable
 
 from pydantic import BaseModel
 
@@ -69,7 +69,7 @@ class ToolRegistry:
                 tool.execute(**arguments),
                 timeout=tool.timeout,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return f"Error: tool '{name}' timed out after {tool.timeout}s"
         except Exception as e:
             return f"Error: {type(e).__name__}: {e}"
@@ -80,7 +80,7 @@ def register_extended_tools(registry: ToolRegistry) -> ToolRegistry:
 
     Returns the registry for chaining.
     """
-    from agent_prod.agent.tools_extended import WebSearchTool, FileReadTool, ShellExecTool
+    from agent_prod.agent.tools_extended import FileReadTool, ShellExecTool, WebSearchTool
     registry.register(WebSearchTool())
     registry.register(FileReadTool())
     registry.register(ShellExecTool())

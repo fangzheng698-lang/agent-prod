@@ -24,7 +24,6 @@ Phase 5.3: Performance Profiling — 性能剖析
 from __future__ import annotations
 
 import json
-import statistics
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -257,7 +256,7 @@ def gate_profile(profiler: Profiler, gate_name: str):
         yield ctx
     finally:
         duration_ms = (time.perf_counter() - start) * 1000
-        passed = ctx.get("passed", None)
+        passed = ctx.get("passed")
         profiler.record_gate(gate_name, duration_ms, passed)
 
 

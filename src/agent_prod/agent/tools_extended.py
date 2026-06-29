@@ -12,11 +12,11 @@ from __future__ import annotations
 
 import asyncio
 import os
+import shlex
 import subprocess
 from typing import ClassVar
 
 from agent_prod.agent.tools import Tool
-
 
 # ═══════════════════════════════════════════════════════════════
 # WebSearchTool — 模拟网页搜索
@@ -296,11 +296,11 @@ class ShellExecTool(Tool):
     @staticmethod
     def _run_command(cmd: str) -> tuple[str, str, bool, int]:
         """同步执行命令（在 executor 线程中运行）。"""
-        timed_out = False
         try:
+            cmd_list = shlex.split(cmd)
             proc = subprocess.run(
-                cmd,
-                shell=True,
+                cmd_list,
+                shell=False,
                 capture_output=True,
                 timeout=_SHELL_TIMEOUT,
                 text=True,
@@ -308,5 +308,4 @@ class ShellExecTool(Tool):
             )
             return proc.stdout, proc.stderr, False, proc.returncode
         except subprocess.TimeoutExpired:
-            timed_out = True
             return "", f"Command timed out after {_SHELL_TIMEOUT}s", True, -1

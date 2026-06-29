@@ -24,9 +24,8 @@ This means:
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any
 
-from .models import GateResult, GateName, Improvement, RollbackLevel
+from .models import GateName, GateResult, Improvement, RollbackLevel
 
 
 class GatePlugin(ABC):
@@ -105,7 +104,7 @@ class GatePlugin(ABC):
 
     @classmethod
     @abstractmethod
-    def from_config(cls, config: dict, name: GateName) -> "GatePlugin":
+    def from_config(cls, config: dict, name: GateName) -> GatePlugin:
         """Factory: create a gate instance from configuration.
 
         Args:

@@ -16,9 +16,8 @@
 from __future__ import annotations
 
 import json
-import os
-from dataclasses import dataclass, field, asdict
-from datetime import datetime, timezone
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -28,7 +27,7 @@ class ReplayRecord:
     """单次执行的完整回放记录。"""
     run_id: str
     timestamp: str = field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+        default_factory=lambda: datetime.now(UTC).isoformat()
     )
     turns: list[dict[str, Any]] = field(default_factory=list)
     final_response: str = ""
@@ -44,7 +43,7 @@ class ReplayRecord:
         }
 
     @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> "ReplayRecord":
+    def from_dict(cls, d: dict[str, Any]) -> ReplayRecord:
         return cls(
             run_id=d.get("run_id", ""),
             timestamp=d.get("timestamp", ""),
@@ -129,7 +128,7 @@ class ReplayPlayer:
         path = self._base_dir / f"{run_id}.json"
         if not path.exists():
             return None
-        with open(path, "r") as f:
+        with open(path) as f:
             data = json.load(f)
         return ReplayRecord.from_dict(data)
 

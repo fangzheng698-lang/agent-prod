@@ -14,22 +14,22 @@ To add a new gate:
   3. Add it to the pipeline order in config
 """
 
+from .engine import QualityGateEngine
 from .interface import (
     GatePlugin,
-    register_gate,
     get_gate,
-    list_registered_gates,
     get_registered_gate_classes,
+    list_registered_gates,
+    register_gate,
 )
 from .models import (
-    GateResult,
     GateName,
+    GateResult,
     Improvement,
     ImprovementStatus,
     RollbackLevel,
     RollbackPlan,
 )
-from .engine import QualityGateEngine
 
 __all__ = [
     "GatePlugin",

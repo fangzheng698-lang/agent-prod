@@ -1,12 +1,12 @@
 """SQLite 持久化状态管理。使用标准 sqlite3。"""
 
 from __future__ import annotations
+
 import json
 import sqlite3
 import threading
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
 
 
 class StateStore:
@@ -48,12 +48,20 @@ class StateStore:
                 error TEXT
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS proxy_sessions (
+                id TEXT PRIMARY KEY,
+                meta_json TEXT DEFAULT '{}',
+                created_at TEXT DEFAULT '',
+                updated_at TEXT DEFAULT ''
+            )
+        """)
         conn.commit()
 
     # ── 会话生命周期 ──
 
     def create_session(self, session_id: str, meta: dict | None = None):
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         conn = self._get_conn()
         conn.execute(
             "INSERT INTO sessions (id, status, messages, meta_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
@@ -70,7 +78,7 @@ class StateStore:
 
     def update_status(self, session_id: str, status: str, error: str | None = None):
         conn = self._get_conn()
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         if error:
             conn.execute(
                 "UPDATE sessions SET status = ?, updated_at = ?, error = ? WHERE id = ?",
@@ -94,7 +102,7 @@ class StateStore:
 
     def save_checkpoint(self, session_id: str, messages: list[dict]):
         conn = self._get_conn()
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         conn.execute(
             "UPDATE sessions SET messages = ?, updated_at = ? WHERE id = ?",
             (json.dumps(messages, ensure_ascii=False), now, session_id),
@@ -115,6 +123,39 @@ class StateStore:
                 "created_at": r["created_at"],
                 "updated_at": r["updated_at"],
                 "error": r["error"],
+            }
+            for r in rows
+        ]
+
+    # ── Proxy Sessions ──
+
+    def _upsert_proxy_session(self, session_id: str, meta: dict) -> None:
+        """Upsert proxy session metadata for dashboard queries."""
+        now = datetime.now(UTC).isoformat()
+        conn = self._get_conn()
+        conn.execute(
+            """INSERT INTO proxy_sessions (id, meta_json, created_at, updated_at)
+               VALUES (?, ?, ?, ?)
+               ON CONFLICT(id) DO UPDATE SET
+                   meta_json = excluded.meta_json,
+                   updated_at = excluded.updated_at""",
+            (session_id, json.dumps(meta, ensure_ascii=False), now, now),
+        )
+        conn.commit()
+
+    def list_proxy_sessions(self, limit: int = 50) -> list[dict]:
+        """List proxy sessions for dashboard display."""
+        conn = self._get_conn()
+        rows = conn.execute(
+            "SELECT id, meta_json, created_at, updated_at FROM proxy_sessions "
+            "ORDER BY updated_at DESC LIMIT ?", (limit,),
+        ).fetchall()
+        return [
+            {
+                "id": r["id"],
+                **json.loads(r["meta_json"]),
+                "created_at": r["created_at"],
+                "updated_at": r["updated_at"],
             }
             for r in rows
         ]

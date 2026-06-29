@@ -12,9 +12,7 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from agent_prod.observability.execution_log import ExecutionLogRecord
 
@@ -71,7 +69,7 @@ def _avg_turns(logs: list[ExecutionLogRecord]) -> float:
     return sum(r.turns for r in logs) / len(logs)
 
 
-def _most_common_gate_failure(logs: list[ExecutionLogRecord]) -> Optional[str]:
+def _most_common_gate_failure(logs: list[ExecutionLogRecord]) -> str | None:
     """找出最常见的门禁失败原因。"""
     failures: dict[str, int] = {}
     for r in logs:
@@ -98,7 +96,7 @@ def analyze_logs(logs: list[ExecutionLogRecord]) -> list[OptimizationSuggestion]
     if len(logs) < SAMPLE_MIN:
         return suggestions
 
-    n = len(logs)
+    _n = len(logs)
     avg_tokens = _avg_tokens_per_exec(logs)
     avg_time = _avg_duration_ms(logs)
     gate_rate = _gate_pass_rate(logs)

@@ -2,31 +2,34 @@
 quality_gates 端到端演示 — Phase 1 版本
 与 Phase 0 行为兼容，所有 6 个场景应全部通过
 """
-import sys
+from datetime import datetime, timezone
 import os
+import sys
 
-# 将父目录加入 sys.path 使 from agent_prod.gates.* 导入正确
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 
-from agent_prod.gates.models import Improvement
 from agent_prod.gates.engine import QualityGateEngine, load_config
+from agent_prod.gates.models import Improvement
 from agent_prod.gates.repository import MemoryRepository
 
 
-# ── 场景定义 ──────────────────────────────────────────────────
+def _full_llm_call(response_id: str) -> dict:
+    return {"response_id": response_id, "duration_ms": 500, "finish_reason": "stop"}
 
-def scenario(name: str, baseline: dict | None = None,
-             candidate: dict | None = None,
-             llm_calls: list | None = None,
-             tool_calls: list | None = None,
-             trace_id: str = "",
-             actual_tokens: int = 1_000,
-             actual_time_ms: int = 1_000,
-             human_approver: str = "",
-             budget_tokens: int = 100_000,
-             budget_time_ms: int = 60_000,
-             expect_production: bool = True) -> Improvement:
-    """创建一个演示场景的 improvement"""
+
+def _full_tool_call(request_id: str, tool: str = "search") -> dict:
+    return {"request_id": request_id, "tool": tool, "duration_ms": 200, "success": True}
+
+
+def scenario(name, baseline=None, candidate=None,
+             llm_calls=None, tool_calls=None,
+             trace_id="",
+             actual_tokens=1_000,
+             actual_time_ms=1_000,
+             human_approver="",
+             budget_tokens=100_000,
+             budget_time_ms=60_000,
+             expect_production=True):
     imp = Improvement(
         name=name,
         baseline_output=baseline or {},
@@ -41,16 +44,15 @@ def scenario(name: str, baseline: dict | None = None,
     )
     if human_approver:
         imp.human_approver = human_approver
-        imp.human_approved_at = __import__("datetime").datetime.now(__import__("datetime").timezone.utc)
+        imp.human_approved_at = datetime.now(timezone.utc)
     imp.metadata["expected"] = "production" if expect_production else "rejected"
     return imp
 
 
-def build_scenarios() -> list[tuple[str, Improvement]]:
-    """构建 6 个演示场景"""
+def build_scenarios():
     scenarios = []
 
-    # 1. 完全通过 — 所有门都符合预期
+    # 1. All gates pass
     scenarios.append(("All gates pass", scenario(
         name="perfect_iteration",
         baseline={"f1_score": 0.85, "latency_p95_ms": 100, "success_rate": 0.99},
@@ -64,20 +66,20 @@ def build_scenarios() -> list[tuple[str, Improvement]]:
             "latency_p95_ms": 95,
             "success_rate": 0.99,
         },
-        llm_calls=[{"response_id": "r1"}],
-        tool_calls=[{"request_id": "r1"}],
+        llm_calls=[_full_llm_call("r1")],
+        tool_calls=[_full_tool_call("r1")],
         human_approver="alice@example.com",
         expect_production=True,
     )))
 
-    # 2. Gate1 失败 — 输出不符合 schema
+    # 2. Gate1: Schema violation
     scenarios.append(("Gate1: Schema violation", scenario(
         name="schema_violation",
         candidate={"bad_field": "no schema match"},
         expect_production=False,
     )))
 
-    # 3. Gate2 失败 — 孤儿工具调用
+    # 3. Gate2: Orphan tool calls
     scenarios.append(("Gate2: Orphan tool calls", scenario(
         name="orphan_tools",
         candidate={
@@ -88,12 +90,12 @@ def build_scenarios() -> list[tuple[str, Improvement]]:
             "warnings": [],
         },
         actual_tokens=500,
-        llm_calls=[{"response_id": "r1"}],
-        tool_calls=[{"request_id": "orphan_1"}],  # 没有对应的 LLM call
+        llm_calls=[_full_llm_call("r1")],
+        tool_calls=[_full_tool_call("orphan_1")],
         expect_production=False,
     )))
 
-    # 4. Gate3 失败 — 回归检测到关键指标下降
+    # 4. Gate3: Regression detected
     scenarios.append(("Gate3: Regression detected", scenario(
         name="regression",
         baseline={"f1_score": 0.85, "latency_p95_ms": 100, "success_rate": 0.99},
@@ -103,14 +105,14 @@ def build_scenarios() -> list[tuple[str, Improvement]]:
             "tools_used": ["search"],
             "token_count": 1_000,
             "warnings": [],
-            "f1_score": 0.50,  # 明显降级
+            "f1_score": 0.50,
             "latency_p95_ms": 95,
             "success_rate": 0.99,
         },
         expect_production=False,
     )))
 
-    # 5. Gate5 失败 — 缺少人工审批（这个场景 Gate4 通过但 Gate5 拒绝）
+    # 5. Gate5: Missing human approval
     scenarios.append(("Gate5: Missing human approval (1)", scenario(
         name="gray_failure",
         baseline={"latency_p95_ms": 100},
@@ -121,12 +123,12 @@ def build_scenarios() -> list[tuple[str, Improvement]]:
             "token_count": 1_000,
             "warnings": [],
         },
-        llm_calls=[{"response_id": "r1"}],
-        tool_calls=[{"request_id": "r1"}],
+        llm_calls=[_full_llm_call("r1")],
+        tool_calls=[_full_tool_call("r1")],
         expect_production=False,
     )))
 
-    # 6. 全部通过（无审批人 — Gate5 人工审批缺失）
+    # 6. Gate5: Missing human approval (2)
     scenarios.append(("Gate5: Missing human approval (2)", scenario(
         name="no_approval",
         baseline={"f1_score": 0.85, "latency_p95_ms": 100, "success_rate": 0.99},
@@ -140,24 +142,18 @@ def build_scenarios() -> list[tuple[str, Improvement]]:
             "latency_p95_ms": 95,
             "success_rate": 0.99,
         },
-        llm_calls=[{"response_id": "r1"}],
-        tool_calls=[{"request_id": "r1"}],
-        human_approver="",  # 没有审批人
+        llm_calls=[_full_llm_call("r1")],
+        tool_calls=[_full_tool_call("r1")],
+        human_approver="",
         expect_production=False,
     )))
 
     return scenarios
 
 
-# ── 主函数 ──────────────────────────────────────────────────
-
 def run_demo():
-    """运行所有场景"""
     scenarios = build_scenarios()
-
-    # 加载配置（使用 demo 模式指标）
     config = load_config()
-    # 强制使用 demo 指标提供者
     if "gates" not in config:
         config["gates"] = {}
     if "gate4" not in config["gates"]:
@@ -172,7 +168,7 @@ def run_demo():
     )
 
     print("=" * 70)
-    print("  Quality Gates — Phase 1 Demo")
+    print("  Quality Gates \u2014 Phase 1 Demo")
     print(f"  {len(scenarios)} scenarios to run")
     print("=" * 70)
     print()
@@ -182,36 +178,30 @@ def run_demo():
 
     for idx, (label, improvement) in enumerate(scenarios, 1):
         print(f"[{idx}/{len(scenarios)}] {label}")
-
         result = engine.run_pipeline(improvement, persist=True)
         expected = improvement.metadata.get("expected", "production")
         actual = result.status.value
         ok = actual == expected
-
-        print(f"      Result: {result.status.value} "
-              f"{'✅' if ok else '❌'} "
-              f"(expected: {expected})")
+        check = "\u2705" if ok else "\u274c"
+        print(f"      Result: {result.status.value} {check} (expected: {expected})")
         for gr in result.gate_results:
-            status = "✅" if gr.passed else "❌"
-            print(f"      {status} {gr.gate_name}: {gr.reason}")
+            st = "\u2705" if gr.passed else "\u274c"
+            print(f"      {st} {gr.gate_name}: {gr.reason}")
         print()
-
         if ok:
             passed += 1
         else:
             failed += 1
 
     print("=" * 70)
-    print(f"  Total: {passed} passed, {failed} failed "
-          f"({len(scenarios)} scenarios)")
+    print(f"  Total: {passed} passed, {failed} failed ({len(scenarios)} scenarios)")
     print("=" * 70)
 
-    # 验证持久化
     saved = repo.list(limit=100)
     print(f"\n  Repository: {len(saved)} improvements persisted")
     for imp in saved:
         gates_str = ", ".join(
-            f"{gr.gate_name}:{'✅' if gr.passed else '❌'}"
+            f"{gr.gate_name}:{'\u2705' if gr.passed else '\u274c'}"
             for gr in imp.gate_results
         )
         print(f"    {imp.name}: {imp.status.value} [{gates_str}]")

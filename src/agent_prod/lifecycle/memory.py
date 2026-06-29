@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 import re
 import sqlite3
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 try:
@@ -68,7 +68,7 @@ class CrossSessionMemory:
 
     def store(self, key: str, value: str, category: str = "general") -> None:
         """存储一条记忆（upsert）。超过上限时 LRU 淘汰。"""
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
 
         existing = self._conn.execute(
             "SELECT key FROM user_memory WHERE key = ?", (key,)
@@ -107,7 +107,7 @@ class CrossSessionMemory:
         if not row:
             return None
 
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         self._conn.execute(
             "UPDATE user_memory SET access_count = access_count + 1, last_accessed_at = ? WHERE key = ?",
             (now, key),
@@ -185,5 +185,6 @@ class CrossSessionMemory:
 
 def _auto_key(n: int) -> str:
     """生成唯一 auto key。"""
-    import hashlib, time
+    import hashlib
+    import time
     return hashlib.md5(f"{time.time()}_{n}".encode()).hexdigest()[:8]

@@ -1,0 +1,10 @@
+name: agent-prod
+version: 1.0.0
+description: "Auto-evaluate Hermes sessions through agent-prod quality gates. Real-time safety gate + data flywheel + response scoring + postgres persistence."
+author: "agent-prod"
+hooks:
+  - pre_tool_call
+  - post_tool_call
+  - transform_llm_output
+  - on_session_start
+  - on_session_end

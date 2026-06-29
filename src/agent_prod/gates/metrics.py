@@ -6,12 +6,11 @@ Phase 1: 用 Prometheus API 替代 random.uniform()
 from __future__ import annotations
 
 import json
-import time
 import logging
+import time
 from abc import ABC, abstractmethod
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
@@ -27,7 +26,7 @@ class GrayMetrics(BaseModel):
     latency_p95_ms: float = 0.0
     resource_pct: float = 0.0
     passed: bool = False
-    sampled_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    sampled_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -56,7 +55,7 @@ class PrometheusMetricsProvider(MetricsProvider):
 
     def __init__(self, prometheus_url: str = "http://localhost:9090",
                  timeout_seconds: float = 5.0,
-                 baseline: Optional[dict[str, float]] = None):
+                 baseline: dict[str, float] | None = None):
         self.base_url = prometheus_url.rstrip("/")
         self.timeout = timeout_seconds
         self.baseline = baseline or {}
@@ -74,7 +73,7 @@ class PrometheusMetricsProvider(MetricsProvider):
 
             # 并行查 3 个指标
             end = time.time()
-            start = end - 300  # 5 分钟窗口
+            _start = end - 300  # 5 分钟窗口
 
             queries = {
                 "error_rate": (
@@ -162,7 +161,7 @@ class ConfigMetricsProvider(MetricsProvider):
     用于本地开发 / CI 环境
     """
 
-    def __init__(self, metrics_config: Optional[dict[str, dict[int, dict]]] = None):
+    def __init__(self, metrics_config: dict[str, dict[int, dict]] | None = None):
         """
         metrics_config 格式:
         {

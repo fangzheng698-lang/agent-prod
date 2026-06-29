@@ -1,269 +1,251 @@
-"""
-Phase 5.1: Gate Stress Harness — 批量门禁压力测试工具
+"""Phase 7.4: GateStress — 并发压力测试。
 
-用途: 对 Quality Gate pipeline 做并发压测，收集汇总统计数据。
-不依赖真实 HTTP 服务器，直接调用 QualityGateGateway.validate()。
+GateStressRunner runs concurrent gate validations against the pipeline
+to verify stability under load and detect regressions before release.
 
-用法:
-    runner = GateStressRunner(validator=my_validator, turns=..., messages=...)
-    report = await runner.run(n_requests=100, concurrency=10)
-    print(report.summary_text())
+Usage:
+    from agent_prod.testing.gate_stress import GateStressRunner
+
+    runner = GateStressRunner()
+    report = await runner.stress_test(gateway, turns_list)
 """
+
 from __future__ import annotations
 
 import asyncio
-import statistics
-import time
 from dataclasses import dataclass, field
-from typing import Any, Callable, Awaitable
-
-
-ValidatorFn = Callable[
-    [str, list[dict], list[Any]],
-    Awaitable[tuple[Any, bool]],
-]
-"""validator(session_id, messages, turns) -> (improvement, all_passed)"""
+from datetime import UTC, datetime
+from typing import Any
 
 
 @dataclass
-class GateStressReport:
-    """单次压测的结果汇总"""
+class StressSample:
+    """Single stress test sample result."""
+    session_id: str
+    gate_pass: bool
+    duration_ms: float
+    error: str = ""
 
-    total: int = 0
+
+@dataclass
+class StressReport:
+    """Aggregated stress test report."""
+    timestamp: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
+    total_samples: int = 0
     passed: int = 0
-    rejected: int = 0
-    gate_failures: dict[str, int] = field(default_factory=dict)
-    latencies: list[float] = field(default_factory=list)
-    errors: int = 0
-    duration_sec: float = 0.0
+    failed: int = 0
+    errored: int = 0
+    avg_duration_ms: float = 0.0
+    max_duration_ms: float = 0.0
+    min_duration_ms: float = 0.0
+    pass_rate: float = 0.0
+    stable: bool = True
+    samples: list[StressSample] = field(default_factory=list)
+    concurrency: int = 0
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "timestamp": self.timestamp,
+            "total_samples": self.total_samples,
+            "passed": self.passed,
+            "failed": self.failed,
+            "errored": self.errored,
+            "avg_duration_ms": round(self.avg_duration_ms, 2),
+            "max_duration_ms": round(self.max_duration_ms, 2),
+            "min_duration_ms": round(self.min_duration_ms, 2),
+            "pass_rate": round(self.pass_rate, 4),
+            "stable": self.stable,
+            "concurrency": self.concurrency,
+        }
 
     @property
-    def pass_rate(self) -> float:
-        if self.total == 0:
-            return 0.0
-        return self.passed / self.total
-
-    @property
-    def fail_rate(self) -> float:
-        if self.total == 0:
-            return 0.0
-        return self.rejected / self.total
-
-    @property
-    def error_rate(self) -> float:
-        if self.total == 0:
-            return 0.0
-        return self.errors / self.total
-
-    def compute_percentiles(self) -> tuple[float, float, float]:
-        """返回 (p50, p95, p99) 延迟，单位 ms"""
-        if not self.latencies:
-            return (0.0, 0.0, 0.0)
-        sorted_lat = sorted(self.latencies)
-        n = len(sorted_lat)
-
-        def _pct(p: float) -> float:
-            idx = int(n * p)
-            if idx >= n:
-                idx = n - 1
-            return sorted_lat[idx]
-
-        return (_pct(0.50), _pct(0.95), _pct(0.99))
-
-    def summary_text(self) -> str:
-        """生成人类可读的汇总报告"""
-        p50, p95, p99 = self.compute_percentiles()
+    def summary(self) -> str:
         lines = [
-            "=" * 60,
-            "  GATE STRESS TEST REPORT",
-            "=" * 60,
-            f"  Total Requests:     {self.total}",
-            f"  Passed:             {self.passed} ({self.pass_rate:.1%})",
-            f"  Rejected:           {self.rejected} ({self.fail_rate:.1%})",
-            f"  Errors:             {self.errors} ({self.error_rate:.1%})",
-            f"  Duration:           {self.duration_sec:.2f}s",
-            f"  Latency p50/p95/p99: {p50:.1f}ms / {p95:.1f}ms / {p99:.1f}ms",
+            f"GateStress: {self.total_samples} samples @ concurrency={self.concurrency}",
+            f"  Pass: {self.passed}/{self.total_samples} ({self.pass_rate:.1%})",
+            f"  Avg: {self.avg_duration_ms:.0f}ms  Max: {self.max_duration_ms:.0f}ms  Min: {self.min_duration_ms:.0f}ms",
+            f"  Stable: {'YES' if self.stable else 'NO'}",
         ]
-
-        if self.gate_failures:
-            lines.append("")
-            lines.append("  Gate Failure Breakdown:")
-            for gate_name, count in sorted(
-                self.gate_failures.items(),
-                key=lambda x: -x[1],
-            ):
-                rate = count / self.total * 100 if self.total else 0
-                lines.append(f"    {gate_name}: {count} ({rate:.1f}%)")
-
-        if self.latencies:
-            lines.append("")
-            lines.append(f"  Latency Stats (ms):")
-            sorted_lat = sorted(self.latencies)
-            lines.append(f"    min={sorted_lat[0]:.1f}  max={sorted_lat[-1]:.1f}")
-            lines.append(f"    mean={statistics.mean(sorted_lat):.1f}  stdev={statistics.stdev(sorted_lat) if len(sorted_lat) > 1 else 0:.1f}")
-
-        lines.append("=" * 60)
         return "\n".join(lines)
 
 
 class GateStressRunner:
-    """
-    门禁压测执行器。
+    """并发门禁压力测试。
 
-    用法:
-        runner = GateStressRunner(
-            validator=gw.validate,
-            turns=[...],
-            messages=[...],
-        )
-        report = await runner.run(n_requests=100, concurrency=10)
+    Runs multiple gate validations concurrently to verify:
+    1. Pipeline doesn't crash under load
+    2. Gate results are consistent
+    3. Latency remains within acceptable bounds
     """
 
     def __init__(
         self,
-        validator: ValidatorFn,
-        turns: list[Any],
-        messages: list[dict],
+        *,
+        max_concurrency: int = 5,
+        max_duration_ms_threshold: float = 5000.0,
+        stability_max_stddev_pct: float = 50.0,
     ):
-        self._validator = validator
-        self._turns = turns
-        self._messages = messages
-        self._session_counter = 0
+        self.max_concurrency = max_concurrency
+        self.max_duration_ms_threshold = max_duration_ms_threshold
+        self.stability_max_stddev_pct = stability_max_stddev_pct
+        self._last_report: StressReport | None = None
 
-    def _next_session_id(self) -> str:
-        self._session_counter += 1
-        return f"stress-{self._session_counter}"
-
-    async def _single_request(
+    async def stress_test(
         self,
-        semaphore: asyncio.Semaphore,
-    ) -> dict:
-        """执行单次门禁验证，返回 {'passed', 'latency_ms', 'failed_gate', 'error'}."""
-        session_id = self._next_session_id()
-        start = time.monotonic()
+        gateway,
+        turns_list: list[list],
+        *,
+        concurrency: int | None = None,
+        session_prefix: str = "stress",
+    ) -> StressReport:
+        """Run concurrent gate validations.
 
-        async with semaphore:
-            try:
-                improvement, all_passed = await self._validator(
-                    session_id, self._messages, self._turns,
-                )
-                latency = (time.monotonic() - start) * 1000
+        Args:
+            gateway: QualityGateGateway instance
+            turns_list: List of turn batches to validate
+            concurrency: Max concurrent validations (default: self.max_concurrency)
+            session_prefix: Prefix for generated session IDs
 
-                failed_gate = None
-                if not all_passed:
-                    # Try to extract which gate failed
-                    if hasattr(improvement, 'fail_gate') and improvement.fail_gate:
-                        fg = improvement.fail_gate
-                        if hasattr(fg, 'value'):
-                            failed_gate = fg.value
-                        else:
-                            failed_gate = str(fg)
-
-                return {
-                    "passed": all_passed,
-                    "latency_ms": latency,
-                    "failed_gate": failed_gate,
-                    "error": None,
-                }
-            except Exception as e:
-                latency = (time.monotonic() - start) * 1000
-                return {
-                    "passed": False,
-                    "latency_ms": latency,
-                    "failed_gate": None,
-                    "error": str(e),
-                }
-
-    async def run(self, n_requests: int = 100, concurrency: int = 10) -> GateStressReport:
+        Returns:
+            StressReport with aggregated results
         """
-        执行压测。
+        concurrency = concurrency or self.max_concurrency
 
-        参数:
-            n_requests: 总请求数
-            concurrency: 最大并发数
-
-        返回:
-            GateStressReport 汇总结果
-        """
-        if n_requests <= 0:
-            return GateStressReport()
+        import time as _time
 
         semaphore = asyncio.Semaphore(concurrency)
+        samples: list[StressSample] = []
 
-        start = time.monotonic()
+        async def _validate_one(idx: int, turns: list) -> StressSample:
+            session_id = f"{session_prefix}-{idx}"
+            t0 = _time.monotonic()
+            try:
+                async with semaphore:
+                    improvement, passed = await gateway.validate(
+                        session_id=session_id,
+                        messages=[],
+                        turns=turns,
+                    )
+                elapsed = (_time.monotonic() - t0) * 1000
+                return StressSample(
+                    session_id=session_id,
+                    gate_pass=passed,
+                    duration_ms=elapsed,
+                )
+            except Exception as e:
+                elapsed = (_time.monotonic() - t0) * 1000
+                return StressSample(
+                    session_id=session_id,
+                    gate_pass=False,
+                    duration_ms=elapsed,
+                    error=str(e)[:200],
+                )
 
-        tasks = [self._single_request(semaphore) for _ in range(n_requests)]
-        results = await asyncio.gather(*tasks)
+        tasks = [_validate_one(i, turns) for i, turns in enumerate(turns_list)]
+        samples = await asyncio.gather(*tasks)
 
-        duration = time.monotonic() - start
+        # Aggregate
+        n = len(samples)
+        if n == 0:
+            return StressReport()
 
-        # 汇总
-        total = len(results)
-        passed = sum(1 for r in results if r["passed"])
-        errors = sum(1 for r in results if r["error"] is not None)
-        rejected = total - passed - errors
-        latencies = [r["latency_ms"] for r in results]
+        passed = sum(1 for s in samples if s.gate_pass and not s.error)
+        failed = sum(1 for s in samples if s.error)
+        errored = sum(1 for s in samples if not s.gate_pass and not s.error)
+        durations = [s.duration_ms for s in samples]
 
-        # 按门统计失败
-        gate_failures: dict[str, int] = {}
-        for r in results:
-            fg = r["failed_gate"]
-            if fg:
-                gate_failures[fg] = gate_failures.get(fg, 0) + 1
+        avg_dur = sum(durations) / n
+        max_dur = max(durations)
+        min_dur = min(durations)
 
-        return GateStressReport(
-            total=total,
+        # Stability check: no errors, all gates pass, latency within bounds
+        has_errors = failed > 0
+        all_pass = passed == n
+
+        # Duration standard deviation as percentage of mean
+        if avg_dur > 0:
+            variance = sum((d - avg_dur) ** 2 for d in durations) / n
+            stddev_pct = (variance ** 0.5) / avg_dur * 100
+        else:
+            stddev_pct = 0.0
+
+        stable = (
+            not has_errors
+            and all_pass
+            and max_dur <= self.max_duration_ms_threshold
+            and stddev_pct <= self.stability_max_stddev_pct
+        )
+
+        report = StressReport(
+            total_samples=n,
             passed=passed,
-            rejected=rejected,
-            gate_failures=gate_failures,
-            latencies=latencies,
-            errors=errors,
-            duration_sec=duration,
-        )
-
-
-async def load_test(
-    n_requests: int = 100,
-    concurrency: int = 10,
-    validator: ValidatorFn | None = None,
-    turns: list[Any] | None = None,
-    messages: list[dict] | None = None,
-    server_url: str = "",
-    prompt_variants: list[str] | None = None,
-) -> GateStressReport:
-    """
-    便捷压测入口。
-
-    当 validator 提供时，直接使用 validator（单元测试模式）。
-    当 server_url 提供时，发送 HTTP 请求到 FastAPI 服务（集成测试模式）。
-
-    参数:
-        n_requests: 总请求数
-        concurrency: 最大并发数
-        validator: 门禁验证函数 (单元测试模式)
-        turns: TurnRecord 列表
-        messages: 消息列表
-        server_url: API 服务器地址 (集成测试模式)
-        prompt_variants: 不同提示词变体（用于 HTTP 模式）
-    """
-    if validator is not None:
-        # 单元测试模式：直接调用 validator
-        turns = turns or []
-        messages = messages or []
-        runner = GateStressRunner(
-            validator=validator,
-            turns=turns,
-            messages=messages,
-        )
-        return await runner.run(
-            n_requests=n_requests,
+            failed=failed,
+            errored=errored,
+            avg_duration_ms=avg_dur,
+            max_duration_ms=max_dur,
+            min_duration_ms=min_dur,
+            pass_rate=passed / n,
+            stable=stable,
+            samples=samples,
             concurrency=concurrency,
         )
+        self._last_report = report
+        return report
 
-    if server_url:
-        # HTTP 集成测试模式（需要 aiohttp 或 httpx）
-        raise NotImplementedError(
-            "HTTP mode requires a running server. Use validator=... for unit test mode."
+    async def stress_test_with_lb(
+        self,
+        gateway,
+        turns_list: list[list],
+        *,
+        concurrency: int | None = None,
+        ramp_up: bool = True,
+        ramp_steps: int = 3,
+    ) -> StressReport:
+        """Load-balancing stress test with optional ramp-up.
+
+        When ramp_up=True, starts with 1 concurrent request and increases
+        to target concurrency over ramp_steps steps.
+        """
+        if not ramp_up or len(turns_list) <= 3:
+            return await self.stress_test(
+                gateway, turns_list, concurrency=concurrency,
+            )
+
+        target = concurrency or self.max_concurrency
+        step_size = max(1, len(turns_list) // ramp_steps)
+        all_samples: list[StressSample] = []
+
+        for step in range(ramp_steps):
+            step_concurrency = max(1, int(target * (step + 1) / ramp_steps))
+            chunk = turns_list[step * step_size : (step + 1) * step_size]
+            if not chunk:
+                continue
+            report = await self.stress_test(
+                gateway, chunk, concurrency=step_concurrency,
+                session_prefix=f"stress-r{step}",
+            )
+            all_samples.extend(report.samples)
+
+        # Re-aggregate
+        n = len(all_samples)
+        passed = sum(1 for s in all_samples if s.gate_pass and not s.error)
+        failed = sum(1 for s in all_samples if s.error)
+        durations = [s.duration_ms for s in all_samples]
+
+        return StressReport(
+            total_samples=n,
+            passed=passed,
+            failed=failed,
+            errored=n - passed - failed,
+            avg_duration_ms=sum(durations) / n if n else 0,
+            max_duration_ms=max(durations) if durations else 0,
+            min_duration_ms=min(durations) if durations else 0,
+            pass_rate=passed / n if n else 0,
+            stable=(failed == 0 and passed == n),
+            samples=all_samples,
+            concurrency=target,
         )
 
-    raise ValueError("Either validator or server_url must be provided")
+    @property
+    def last_report(self) -> StressReport | None:
+        return self._last_report

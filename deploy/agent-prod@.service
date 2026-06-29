@@ -1,0 +1,47 @@
+[Unit]
+Description=agent-prod — quality gate service for AI agents
+Documentation=https://github.com/your-org/agent-prod
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=agent-prod
+Group=agent-prod
+WorkingDirectory=/opt/agent-prod
+
+# ── ExecStart ──────────────────────────────────────────────────
+# %i = instance number (0, 1, 2, ...), maps to port 8765 + %i
+# Two instances = production minimum: enable agent-prod@0 and agent-prod@1
+EnvironmentFile=/opt/agent-prod/.env
+ExecStart=/opt/agent-prod/.venv/bin/python3 -m agent_prod serve \
+    --port $((8765 + %i)) \
+    --host 127.0.0.1 \
+    --quality-gates-mode production \
+    --quality-gates-config /opt/agent-prod/quality_gates/config.yaml
+
+Restart=always
+RestartSec=5
+LimitNOFILE=65536
+
+# Health check
+ExecStartPost=/bin/bash -c 'for i in $(seq 1 30); do curl -sf http://127.0.0.1:$((8765 + %i))/ready && exit 0; sleep 1; done; exit 1'
+
+# ── Resource limits ──
+MemoryHigh=512M
+MemoryMax=768M
+CPUQuota=200%
+
+# ── Security hardening ──
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/quality_gates /var/log/quality_gates
+ReadOnlyPaths=/opt/agent-prod
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+[Install]
+WantedBy=multi-user.target

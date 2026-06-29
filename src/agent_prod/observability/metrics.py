@@ -21,7 +21,6 @@ from __future__ import annotations
 import time
 from collections import defaultdict
 from threading import Lock
-from typing import Optional
 
 
 class Metric:
@@ -122,7 +121,7 @@ class LabeledCounter(Metric):
 
     def labels(self, **kwargs) -> LabeledCounter:
         """Return a label-scoped view."""
-        key = tuple(kwargs.get(n, "") for n in self._label_names)
+        _key = tuple(kwargs.get(n, "") for n in self._label_names)
         return self
 
     def inc(self, amount: float = 1.0, **label_values):
@@ -189,8 +188,8 @@ class MetricsRegistry:
         lines = []
         # Process-level metrics
         uptime = time.time() - self._start_time
-        lines.append(f"# HELP agent_prod_uptime_seconds Total uptime")
-        lines.append(f"# TYPE agent_prod_uptime_seconds gauge")
+        lines.append("# HELP agent_prod_uptime_seconds Total uptime")
+        lines.append("# TYPE agent_prod_uptime_seconds gauge")
         lines.append(f"agent_prod_uptime_seconds {uptime:.1f}")
 
         with self._lock:

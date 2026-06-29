@@ -189,4 +189,5 @@ print(f"  Phase 11: {PASS} passed, {FAIL} failed ({PASS+FAIL} total)")
 if FAIL == 0: print("  ✅ ALL TESTS PASSED")
 else: print(f"  ❌ {FAIL} FAILURES")
 print("=" * 60)
-sys.exit(0 if FAIL == 0 else 1)
+if __name__ == "__main__":
+    sys.exit(0 if FAIL == 0 else 1)

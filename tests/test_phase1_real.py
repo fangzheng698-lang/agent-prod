@@ -46,7 +46,7 @@ def make_improvement(name="test", **kwargs) -> Improvement:
         "budget_time_ms": 60_000,
         "actual_tokens": 500,
         "actual_time_ms": 1_000,
-        "llm_calls": [{"response_id": "r1"}],
+        "llm_calls": [{"response_id": "r1", "duration_ms": 500}],
         "tool_calls": [{"request_id": "r1"}],
     }
     defaults.update(kwargs)
@@ -152,7 +152,7 @@ print("── 6. Gate2: trace_id → Jaeger unreachable → OTel fallback → ca
 from agent_prod.gates.gate2_trace import Gate2TraceIntegrity
 gate2 = Gate2TraceIntegrity(jaeger_url="http://127.0.0.1:29999")
 imp6 = make_improvement("trace-test", trace_id="fake-trace-001",
-    llm_calls=[{"response_id": "r1"}, {"response_id": "r2"}],
+    llm_calls=[{"response_id": "r1", "duration_ms": 1200}, {"response_id": "r2", "duration_ms": 800}],
     tool_calls=[{"request_id": "r1"}, {"request_id": "r2"}],
 )
 result6 = gate2.verify(imp6)
@@ -162,7 +162,7 @@ ok(f"Gate2(Jaeger down→caller/callee fallback): {result6.reason}")
 # ── 7. Gate2: orphan detection via caller/callee ─────────────
 print("── 7. Gate2: orphan tool call detection ──")
 imp7 = make_improvement("orphan-test",
-    llm_calls=[{"response_id": "r1"}],
+    llm_calls=[{"response_id": "r1", "duration_ms": 500}],
     tool_calls=[{"request_id": "orphan_x"}],
 )
 result7 = gate2.verify(imp7)
@@ -316,4 +316,5 @@ if FAIL == 0:
 else:
     print(f"  ⚠️  {FAIL} FAILURES")
 print("=" * 65)
-sys.exit(0 if FAIL == 0 else 1)
+if __name__ == "__main__":
+    sys.exit(0 if FAIL == 0 else 1)

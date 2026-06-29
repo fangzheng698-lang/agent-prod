@@ -15,20 +15,18 @@ Usage:
 from __future__ import annotations
 
 import json
-import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Optional
 
 import click
 
-from agent_prod.observability.execution_log import ExecutionLogRecord, ExecutionLogger
+from agent_prod.observability.execution_log import ExecutionLogger, ExecutionLogRecord
 
 HERMES_SESSIONS_DIR = Path.home() / ".hermes" / "sessions"
 DEFAULT_OUTPUT = "data/execution_log.jsonl"
 
 
-def parse_hermes_session(session_path: Path) -> Optional[ExecutionLogRecord]:
+def parse_hermes_session(session_path: Path) -> ExecutionLogRecord | None:
     """Convert a single Hermes session file to an ExecutionLogRecord."""
     try:
         with open(session_path) as f:
@@ -43,7 +41,7 @@ def parse_hermes_session(session_path: Path) -> Optional[ExecutionLogRecord]:
     messages = sess.get("messages", [])
     message_count = sess.get("message_count", len(messages))
     model = sess.get("model", "unknown")
-    tools_used = [t.get("name", t) if isinstance(t, dict) else str(t)
+    _tools_used = [t.get("name", t) if isinstance(t, dict) else str(t)
                   for t in sess.get("tools", [])]
 
     # Extract last assistant response
@@ -93,14 +91,14 @@ def parse_hermes_session(session_path: Path) -> Optional[ExecutionLogRecord]:
         tokens_used=prompt_tokens + completion_tokens,
         gate_passed=True,  # no gates ran on these historical sessions
         quality_gate_result={"status": "historical", "note": "Imported from Hermes session"},
-        created_at=session_start or datetime.now(timezone.utc).isoformat(),
+        created_at=session_start or datetime.now(UTC).isoformat(),
     )
 
 
 def ingest_sessions(
     sessions_dir: Path = HERMES_SESSIONS_DIR,
     output_path: str = DEFAULT_OUTPUT,
-    limit: Optional[int] = None,
+    limit: int | None = None,
 ) -> int:
     """Ingest Hermes session files into execution logs.
 
@@ -131,7 +129,7 @@ def ingest_sessions(
 @click.option("--output", default=DEFAULT_OUTPUT, help="Output JSONL path")
 @click.option("--sessions-dir", default=str(HERMES_SESSIONS_DIR),
               help="Hermes sessions directory")
-def main(recent: Optional[int], output: str, sessions_dir: str):
+def main(recent: int | None, output: str, sessions_dir: str):
     """Ingest Hermes Agent sessions into ExecutionLogRecords.
 
     Produces a JSONL file consumable by the quality gates pipeline
@@ -149,10 +147,12 @@ def main(recent: Optional[int], output: str, sessions_dir: str):
         from agent_prod.observability.execution_log import ExecutionLogger
         logger = ExecutionLogger(output)
         stats = logger.get_stats()
-        print(f"\nStats: {stats['total_records']} records")
-        print(f"  Models: {stats.get('models', {})}")
-        print(f"  Avg tokens: {stats.get('avg_tokens_used', 0):.0f}")
-        print(f"  Avg duration: {stats.get('avg_duration_ms', 0):.0f}ms")
+        print(f"\nStats: {stats['total_executions']} records, {stats['total_sessions']} unique sessions")
+        print(f"  Tokens: prompt={stats['total_tokens']['prompt']}, completion={stats['total_tokens']['completion']}")
+        print(f"  Avg turns: {stats['avg_turns']}")
+        total_s = stats['total_duration_ms'] / 1000
+        print(f"  Total duration: {total_s:.0f}s")
+        print(f"  Gate pass rate: {stats['gate_pass_rate']:.2%}")
 
 
 if __name__ == "__main__":

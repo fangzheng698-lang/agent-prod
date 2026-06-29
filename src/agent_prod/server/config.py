@@ -44,6 +44,13 @@ class Settings(BaseSettings):
     # ── Observability ──
     metrics_enabled: bool = True
 
+    # ── Security ──
+    api_key: str = ""
+    auth_required: bool = True
+    rate_limit_enabled: bool = True
+    rate_limit_rpm: int = 60
+    rate_limit_burst: int = 10
+
 
 # ── Override from HERMES_CONFIG YAML (hermes CLI) ──
 def _load_hermes_config() -> dict:
@@ -90,6 +97,17 @@ def _load_hermes_config() -> dict:
         overrides["quality_gates_mode"] = gates["mode"]
     if gates.get("config_path"):
         overrides["quality_gates_config"] = gates["config_path"]
+
+    security = cfg.get("security", {})
+    if security.get("api_key"):
+        overrides["api_key"] = security["api_key"]
+    if "auth_required" in security:
+        overrides["auth_required"] = security["auth_required"]
+    rate = security.get("rate_limit", {})
+    if rate.get("requests_per_minute"):
+        overrides["rate_limit_rpm"] = rate["requests_per_minute"]
+    if rate.get("burst"):
+        overrides["rate_limit_burst"] = rate["burst"]
 
     return overrides
 

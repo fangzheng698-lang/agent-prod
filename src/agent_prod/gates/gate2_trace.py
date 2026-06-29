@@ -10,28 +10,36 @@ from __future__ import annotations
 import logging
 import time
 import uuid
-from datetime import datetime, timezone
-from typing import Any, Optional
+from datetime import UTC, datetime
+from typing import Any
 
-from .models import GateResult, GateName, Improvement, RollbackLevel, RollbackPlan
+from .models import GateName, GateResult, Improvement, RollbackLevel, RollbackPlan
 
 logger = logging.getLogger(__name__)
 
 # ── OTel 集成 ──────────────────────────────────────────────────
 try:
     from opentelemetry import trace
+    from opentelemetry.sdk.resources import SERVICE_NAME, Resource
     from opentelemetry.sdk.trace import TracerProvider
     from opentelemetry.sdk.trace.export import (
         BatchSpanProcessor,
         ConsoleSpanExporter,
         SimpleSpanProcessor,
     )
+    from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (
+        OTLPSpanExporter,
+    )
     from opentelemetry.trace import SpanKind, Status, StatusCode
-
-    from opentelemetry.sdk.resources import SERVICE_NAME, Resource
     _OTEL_AVAILABLE = True
 except ImportError:
     _OTEL_AVAILABLE = False
+
+try:
+    import grpc
+    _GRPC_AVAILABLE = True
+except ImportError:
+    _GRPC_AVAILABLE = False
 
 
 class TraceSpan:
@@ -49,7 +57,7 @@ class TraceSpan:
         self.parent_span_id = parent_span_id
         self.span_kind = span_kind
         self.start_time = time.time()
-        self.end_time: Optional[float] = None
+        self.end_time: float | None = None
         self.attributes: dict[str, Any] = {}
         self.status_ok: bool = True
         self.status_message: str = ""
@@ -241,7 +249,7 @@ class OTelTracer:
             f"{integrity['stats']['roots']} roots, {integrity['stats']['leaves']} leaves",
         ]
         if integrity['errors']:
-            lines.append(f"Errors:")
+            lines.append("Errors:")
             for e in integrity['errors']:
                 lines.append(f"  - {e}")
         lines.append("Span tree:")
@@ -285,7 +293,7 @@ class JaegerAPIClient:
         self.timeout = timeout_seconds
         self._degraded = False
 
-    def query_trace(self, trace_id: str) -> Optional[dict[str, Any]]:
+    def query_trace(self, trace_id: str) -> dict[str, Any] | None:
         """从 Jaeger API 查询完整 trace"""
         if self._degraded:
             return None
@@ -419,6 +427,49 @@ class JaegerAPIClient:
         }
 
 
+# ── OTel Collector 客户端 ───────────────────────────────────────
+
+class OtelCollectorClient:
+    """OTel Collector 查询客户端 — gRPC 可达性验证。
+
+    生产环境：对接 OTel Collector 的 OTLP receiver，
+    collector 负责将 span 数据 routing 到 Jaeger/Tempo/日志后端。
+    本客户端验证 Collector 可达性作为生产模式信号。
+    """
+
+    def __init__(self, grpc_endpoint: str = "localhost:4317",
+                 timeout_seconds: float = 5.0):
+        self.grpc_endpoint = grpc_endpoint
+        self.timeout = timeout_seconds
+        self._degraded = False
+
+    def health_check(self) -> bool:
+        """检查 Collector 是否可达"""
+        if not _GRPC_AVAILABLE:
+            return False
+        try:
+            channel = grpc.insecure_channel(self.grpc_endpoint)
+            grpc.channel_ready_future(channel).result(
+                timeout=self.timeout
+            )
+            return True
+        except Exception:
+            return False
+
+    def query_spans(self, trace_id: str) -> dict[str, Any] | None:
+        """查询 Collector 状态（生产模式可达性信号）"""
+        if self._degraded:
+            return None
+        if self.health_check():
+            return {
+                "source": "otel_collector",
+                "endpoint": self.grpc_endpoint,
+                "trace_id": trace_id,
+                "note": "Spans routed via OTel Collector",
+            }
+        return None
+
+
 # ── Gate2 执行器 ────────────────────────────────────────────────
 
 class Gate2TraceIntegrity:
@@ -426,16 +477,20 @@ class Gate2TraceIntegrity:
 
     def __init__(self, use_otel: bool = False,
                  jaeger_url: str = "",
-                 otel_endpoint: str = ""):
+                 otel_endpoint: str = "",
+                 otel_collector_grpc: str = ""):
         self.tracer = OTelTracer(use_otel=use_otel)
         self.jaeger_client = JaegerAPIClient(
             base_url=jaeger_url or "http://localhost:16686"
         ) if jaeger_url else None
+        self.otel_collector = OtelCollectorClient(
+            grpc_endpoint=otel_collector_grpc or "localhost:4317"
+        )
         self.otel_endpoint = otel_endpoint
         self.use_otel = use_otel
 
     @classmethod
-    def from_yaml(cls, config: dict | None = None) -> "Gate2TraceIntegrity":
+    def from_yaml(cls, config: dict | None = None) -> Gate2TraceIntegrity:
         """从 config.yaml 加载配置"""
         otel_cfg = (config or {}).get("observability", {}).get("otel", {})
         jaeger_url = (config or {}).get("observability", {}).get("jaeger_url", "")
@@ -443,6 +498,7 @@ class Gate2TraceIntegrity:
             use_otel=otel_cfg.get("enabled", False),
             otel_endpoint=otel_cfg.get("endpoint", ""),
             jaeger_url=jaeger_url or otel_cfg.get("jaeger_url", ""),
+            otel_collector_grpc=otel_cfg.get("collector_grpc", ""),
         )
 
     def record_llm_call(self, improvement: Improvement, span_id: str,
@@ -464,6 +520,17 @@ class Gate2TraceIntegrity:
     def verify(self, improvement: Improvement) -> GateResult:
         """执行 Gate2 验证 — Phase 1: 先查 Jaeger，再查 OTel，最后降级"""
         start = time.time()
+
+        # ── 路径 0: OTel Collector 可达 → 生产模式信号 ──
+        try:
+            collector_data = self.otel_collector.query_spans(
+                improvement.trace_id
+            )
+            if collector_data and collector_data.get("source") == "otel_collector":
+                logger.info("Gate2: OTel Collector reachable at %s",
+                            self.otel_collector.grpc_endpoint)
+        except Exception as e:
+            logger.debug("OTel Collector query: %s", e)
 
         # ── 路径 1: 有 Jaeger 客户端 + trace_id → 查真实 trace ──
         if self.jaeger_client and improvement.trace_id:
@@ -515,33 +582,144 @@ class Gate2TraceIntegrity:
                 duration_ms=(time.time() - start) * 1000,
             )
 
-        # 检查 caller/callee 关系
-        tool_request_ids = {
-            tc.get("request_id", "") for tc in improvement.tool_calls
-        }
-        llm_response_ids = {
-            lc.get("response_id", "") for lc in improvement.llm_calls
-        }
-
-        missing_parents = tool_request_ids - llm_response_ids
-        valid = len(missing_parents) == 0
+        details = Gate2TraceIntegrity._check_local_dag(improvement)
+        valid = details["valid"]
 
         return GateResult(
             gate_name=GateName.GATE2,
             passed=valid,
             reason=(
-                "Trace integrity verified — all tool calls have LLM parents"
+                "Trace DAG integrity verified — all calls form a valid graph"
                 if valid
-                else f"Orphan tool calls: {len(missing_parents)} tool calls have no matching LLM call"
+                else "; ".join(details.get("errors", [])[:3])
             ),
-            details={
-                "valid": valid,
-                "llm_calls": len(improvement.llm_calls),
-                "tool_calls": len(improvement.tool_calls),
-                "orphan_tool_calls": list(missing_parents),
-            },
+            details=details,
             duration_ms=(time.time() - start) * 1000,
         )
+
+    @staticmethod
+    def _check_local_dag(improvement: Improvement) -> dict[str, Any]:
+        """Local DAG validator without Jaeger/OTel infrastructure.
+
+        Builds a call graph from improvement.llm_calls and improvement.tool_calls,
+        then checks for:
+        - Orphaned tool calls (no parent LLM response)
+        - Orphaned LLM calls (produced no tool calls and are not standalone)
+        - Time ordering violations (tool call starts before its parent LLM ends)
+        - Unterminated LLM calls (missing duration_ms / finish_reason)
+        - Cycles in the call graph (tool → LLM → same tool)
+
+        Returns a dict with the same shape as check_integrity():
+            valid, errors, llm_calls, tool_calls, orphan_tool_calls,
+            orphan_llm_calls, time_violations, unterminated_llm_calls, cycles
+        """
+        errors: list[str] = []
+
+        # Build lookup maps
+        llm_by_resp: dict[str, dict] = {}
+        for lc in improvement.llm_calls:
+            rid = lc.get("response_id", "")
+            if rid:
+                llm_by_resp[rid] = lc
+
+        tool_by_req: dict[str, list[dict]] = {}
+        for tc in improvement.tool_calls:
+            req_id = tc.get("request_id", "")
+            tool_by_req.setdefault(req_id, []).append(tc)
+
+        # 1. Orphaned tool calls — request_id references no LLM response_id
+        orphan_tool_calls: list[str] = []
+        for tc in improvement.tool_calls:
+            req_id = tc.get("request_id", "")
+            if req_id and req_id not in llm_by_resp:
+                orphan_tool_calls.append(
+                    f"{tc.get('tool', '?')}(request_id={req_id})"
+                )
+        if orphan_tool_calls:
+            errors.append(f"Orphan tool calls: {orphan_tool_calls}")
+
+        # 2. Orphaned LLM calls — response_id not referenced by any tool call
+        #    Skip if there are no tool calls at all (valid state for query-only sessions)
+        orphan_llm_calls: list[str] = []
+        if improvement.tool_calls:
+            tool_request_ids = {tc.get("request_id", "") for tc in improvement.tool_calls}
+            for lc in improvement.llm_calls:
+                resp_id = lc.get("response_id", "")
+                if resp_id and resp_id not in tool_request_ids:
+                    orphan_llm_calls.append(
+                        f"{lc.get('model', '?')}(response_id={resp_id})"
+                    )
+            if orphan_llm_calls:
+                errors.append(f"Orphan LLM calls (no tool calls reference them): {orphan_llm_calls}")
+
+        # 3. Time ordering — each tool call must start after its parent LLM call ends
+        time_violations: list[str] = []
+        for tc in improvement.tool_calls:
+            req_id = tc.get("request_id", "")
+            parent = llm_by_resp.get(req_id)
+            if parent and "duration_ms" in parent:
+                tool_start = tc.get("start_time") or tc.get("timestamp", 0)
+                llm_start = parent.get("start_time", 0)
+                llm_duration = parent.get("duration_ms", 0)
+                llm_end = llm_start + llm_duration
+                if tool_start and llm_start and tool_start < llm_end:
+                    time_violations.append(
+                        f"{tc.get('tool', '?')} starts before parent LLM "
+                        f"{parent.get('model', '?')} ends"
+                    )
+        if time_violations:
+            errors.append(f"Time ordering violations: {time_violations}")
+
+        # 4. Unterminated LLM calls — missing duration_ms or finish_reason
+        unterminated_llm_calls: list[str] = []
+        for lc in improvement.llm_calls:
+            if "duration_ms" not in lc and "finish_reason" not in lc:
+                unterminated_llm_calls.append(
+                    f"{lc.get('model', '?')}(request_id={lc.get('request_id', '')})"
+                )
+        if unterminated_llm_calls:
+            errors.append(f"Unterminated LLM calls: {unterminated_llm_calls}")
+
+        # 5. Cycle detection — tool → LLM → tool where a later LLM references
+        #    a tool_call_id that indirectly chains back
+        cycles: list[str] = []
+        tc_parent_map: dict[str, str] = {}  # tool_response_id → parent request_id
+        for tc in improvement.tool_calls:
+            tid = tc.get("response_id", "")
+            pid = tc.get("request_id", "")
+            if tid and pid:
+                tc_parent_map[tid] = pid
+
+        # Check for tool call whose response_id is reused as a tool's request_id
+        # through an LLM call — basic 2-hop cycle detection
+        tc_ids = {tc.get("response_id", "") for tc in improvement.tool_calls}
+        for lc in improvement.llm_calls:
+            lr_id = lc.get("request_id", "")
+            if lr_id and lr_id in tc_ids:
+                # This LLM call was triggered by a tool result — check if the
+                # tool that produced it was itself triggered by this LLM's response
+                parent_resp = lc.get("response_id", "")
+                for tc in improvement.tool_calls:
+                    if tc.get("request_id") == parent_resp:
+                        cycles.append(
+                            f"Cycle: LLM({lc.get('model', '?')}) → "
+                            f"Tool({tc.get('tool', '?')}) → LLM"
+                        )
+        if cycles:
+            errors.append(f"Call graph cycles detected: {cycles}")
+
+        return {
+            "valid": len(errors) == 0,
+            "errors": errors,
+            "llm_calls": len(improvement.llm_calls),
+            "tool_calls": len(improvement.tool_calls),
+            "orphan_tool_calls": orphan_tool_calls,
+            "orphan_llm_calls": orphan_llm_calls,
+            "time_violations": time_violations,
+            "unterminated_llm_calls": unterminated_llm_calls,
+            "cycles": cycles,
+            "source": "local_dag",
+        }
 
     @staticmethod
     def rollback(improvement: Improvement) -> None:
@@ -551,12 +729,12 @@ class Gate2TraceIntegrity:
             scope="discard trace logs for this TaskRun",
             estimated_seconds=5,
             procedure="DELETE spans WHERE trace_id = ?; drop tool_calls/llm_calls records",
-            executed_at=datetime.now(timezone.utc),
+            executed_at=datetime.now(UTC),
             success=True,
         )
 
 # ── GatePlugin registration ──────────────────────────────
 from .interface import register_gate
-from .models import GateName
+
 register_gate(GateName.GATE2, Gate2TraceIntegrity)
 

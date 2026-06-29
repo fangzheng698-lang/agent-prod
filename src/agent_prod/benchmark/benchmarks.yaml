@@ -1,0 +1,148 @@
+# agent-prod Benchmark 数据集 — Gate6 答案质量评估标准测试集
+#
+# 设计原则:
+#   - 好答案 (good): 验证不应误杀
+#   - 偏题答案 (off-topic): 验证能检测答非所问
+#   - 烂答案 (bad): 验证能检测质量低下/幻觉/敷衍
+#
+# candidate_answer 字段用于注入变体答案 (为空则用 expected_answer)
+# 用法: python -m agent_prod.benchmark.run
+#
+# 标签说明:
+#   expected_grade: good|off-topic|bad — 人工标注的预期等级
+#   expected_range_high: 此类答案的合理得分上限 (0-1)
+#   expected_range_low:  此类答案的合理得分下限 (0-1)
+
+benchmarks:
+  # ═══════════════════ 好答案 (15 题，预期 0.70+) ═══════════════════
+  - id: "good-001"
+    question: "How do I fix a Gate6 timeout issue?"
+    expected_answer: "Switch the evaluator model from a reasoning model (like feature/deepseek) to a non-reasoning model (like lite/qwen-flash) in config.yaml. Update llm_model under the gate6 section and set max_tokens to 200. Restart the server."
+    category: "config"
+    expected_grade: "good"
+    expected_range_low: 0.70
+    expected_range_high: 1.00
+
+  - id: "good-002"
+    question: "What does dynamic_baseline: true do?"
+    expected_answer: "It enables Gate3 to use historical PRODUCTION metrics as a baseline for regression detection. Instead of a static threshold, it uses the most recent N PRODUCTION records to compute a dynamic baseline. This makes regression detection adaptive to real-world performance."
+    category: "architecture"
+    expected_grade: "good"
+    expected_range_low: 0.70
+    expected_range_high: 1.00
+
+  - id: "good-003"
+    question: "How does Gate0 permission checking work?"
+    expected_answer: "Gate0 checks tool calls against a per-agent ACL whitelist and a sandbox path whitelist. Trusted agents (hermes) bypass argument inspection. Non-trusted agents get full defense: terminal command inspection, path blacklist checks, and argument pattern matching for dangerous operations."
+    category: "architecture"
+    expected_grade: "good"
+    expected_range_low: 0.70
+    expected_range_high: 1.00
+
+  - id: "good-004"
+    question: "Explain the auto_evolve_baseline feature."
+    expected_answer: "When auto_evolve_baseline is true, every PRODUCTION session's candidate_output automatically becomes the new baseline for its agent type. This means Gate3 regression detection continuously adapts — the baseline evolves with each successful deployment, creating a true closed-loop system."
+    category: "architecture"
+    expected_grade: "good"
+    expected_range_low: 0.70
+    expected_range_high: 1.00
+
+  - id: "good-005"
+    question: "What is the purpose of Gate6 no-ref-llm evaluator?"
+    expected_answer: "The no-ref-llm evaluator assesses answer quality WITHOUT requiring an expected answer. It uses an external LLM to rate the response on 5 dimensions: relevance, completeness, coherence, accuracy, and helpfulness. This enables zero-friction quality evaluation — no manual expected_answer needed."
+    category: "architecture"
+    expected_grade: "good"
+    expected_range_low: 0.70
+    expected_range_high: 1.00
+
+  # ═══════════════════ 偏题答案 (5 题，预期 0.30~0.65) ══════════════
+  - id: "off-001"
+    question: "How does Gate0 permission checking work?"
+    expected_answer: "Gate0 checks tool calls against a per-agent ACL whitelist and sandbox whitelist. Trusted agents bypass argument inspection; non-trusted agents get full defense."
+    candidate_answer: "Gate6 is the answer quality evaluator. It uses LLM-as-judge to score responses on relevance, completeness, and accuracy. You can configure it in config.yaml under the gate6 section."
+    category: "off-topic"
+    expected_grade: "off-topic"
+    expected_range_low: 0.30
+    expected_range_high: 0.65
+
+  - id: "off-002"
+    question: "How do I configure the Gate1 token budget for hermes?"
+    expected_answer: "Edit config.yaml under gates.gate1.budgets.hermes and set token_budget to a higher value. The P95 threshold is calibrated from real session data."
+    candidate_answer: "To optimize your app, you should use caching, reduce image sizes, and minimize JavaScript bundles. These are the three most impactful performance optimizations."
+    category: "off-topic"
+    expected_grade: "off-topic"
+    expected_range_low: 0.10
+    expected_range_high: 0.45
+
+  - id: "off-003"
+    question: "What happens when the circuit breaker opens in Gate1?"
+    expected_answer: "Gate1 enters degraded mode and skips evaluation for the cooldown period (default 60s). After cooldown it auto-retries."
+    candidate_answer: "In a healthy software development lifecycle, having a nap after lunch is essential. It boosts productivity by 30%. Coffee is also important — drink at least 3 cups before any deployment. Trust me, I'm a doctor."
+    category: "off-topic"
+    expected_grade: "off-topic"
+    expected_range_low: 0.00
+    expected_range_high: 0.30
+
+  - id: "off-004"
+    question: "How does the gray release stage machine work?"
+    expected_answer: "Gray release stages progress through 1% > 10% > 50% > 100% traffic, each with minimum duration and error threshold. If error exceeds threshold, rollout is reversed."
+    candidate_answer: "Releasing software is simple: just push to production and monitor. If something goes wrong, fix it. Gray releases are over-engineering for most teams."
+    category: "off-topic"
+    expected_grade: "off-topic"
+    expected_range_low: 0.20
+    expected_range_high: 0.55
+
+  - id: "off-005"
+    question: "How do I backfill historical sessions into the quality gate pipeline?"
+    expected_answer: "Use backfill_sessions.py script to read session files and POST them to /v1/agent/evaluate."
+    candidate_answer: "The best pizza in New York is at Joe's on Carmine Street. Thin crust, perfect sauce-to-cheese ratio. You should try the margherita. Also, Central Park is beautiful in autumn."
+    category: "off-topic"
+    expected_grade: "off-topic"
+    expected_range_low: 0.10
+    expected_range_high: 0.45
+
+  # ═══════════════════ 烂答案 (5 题，预期 0.00~0.35) ═══════════════
+  - id: "bad-001"
+    question: "What does dynamic_baseline: true do?"
+    expected_answer: "It enables Gate3 to use historical PRODUCTION metrics as a dynamic baseline for regression detection."
+    candidate_answer: "I don't know."
+    category: "bad"
+    expected_grade: "bad"
+    expected_range_low: 0.00
+    expected_range_high: 0.30
+
+  - id: "bad-002"
+    question: "How do I fix a Gate6 timeout issue?"
+    expected_answer: "Switch to a non-reasoning model like lite/qwen-flash, set max_tokens to 200, and restart."
+    candidate_answer: "Try turning it off and on again. If that doesn't work, maybe the moon is in retrograde. Some things just aren't meant to work."
+    category: "bad"
+    expected_grade: "bad"
+    expected_range_low: 0.00
+    expected_range_high: 0.35
+
+  - id: "bad-003"
+    question: "Explain the purpose of Gate3 regression detection."
+    expected_answer: "Gate3 compares current metrics against baseline to detect performance regression using regress_pct threshold."
+    candidate_answer: "Gate3 is the third gate. It does regression things. You need to configure it properly. It's important for the pipeline."
+    category: "bad"
+    expected_grade: "bad"
+    expected_range_low: 0.20
+    expected_range_high: 0.50
+
+  - id: "bad-004"
+    question: "What is the Gate6 pass_threshold default value?"
+    expected_answer: "The default pass_threshold is 0.70, meaning scores at or above 0.7 are considered PASS."
+    candidate_answer: "The pass_threshold is 0.9999 and if you fail, the server will self-destruct. Also, you need to run 'sudo rm -rf /' as root to reset the evaluation pipeline. This is documented in the ancient scrolls."
+    category: "bad"
+    expected_grade: "bad"
+    expected_range_low: 0.00
+    expected_range_high: 0.25
+
+  - id: "bad-005"
+    question: "How does the watchdog integrate Hermes sessions?"
+    expected_answer: "The SessionWatchdog polls ~/.hermes/sessions/ for new session files and POSTs them to /v1/agent/evaluate."
+    candidate_answer: ""  # 空回答
+    category: "bad"
+    expected_grade: "bad"
+    expected_range_low: 0.00
+    expected_range_high: 0.25

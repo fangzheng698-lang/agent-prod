@@ -7,14 +7,17 @@ from __future__ import annotations
 
 import logging
 import time
-from datetime import datetime, timezone
-from typing import Any, Callable
+from collections.abc import Callable
+from datetime import UTC, datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from .models import (
-    GateResult, GateName, Improvement, ImprovementStatus,
-    RollbackLevel, RollbackPlan,
+    GateName,
+    GateResult,
+    Improvement,
+    RollbackLevel,
+    RollbackPlan,
 )
 
 logger = logging.getLogger(__name__)
@@ -111,7 +114,7 @@ def require_rollback_plan_ready(imp: Improvement) -> PolicyRule:
             scope="revert to previous stable release",
             estimated_seconds=30,
             procedure="git revert + deploy previous version",
-            executed_at=datetime.now(timezone.utc),
+            executed_at=datetime.now(UTC),
             success=True,
         )
         return PolicyRule(
@@ -182,7 +185,7 @@ def require_human_approval(imp: Improvement) -> PolicyRule:
 
 def check_release_window(imp: Improvement) -> PolicyRule:
     """发布窗口（默认 09:00-18:00）"""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     hour = now.hour
     in_window = 9 <= hour <= 18
     return PolicyRule(
@@ -254,7 +257,7 @@ class Gate5ReleaseAudit:
             scope="do not deploy — already stopped at gate",
             estimated_seconds=0,
             procedure="No deployment was made; mark improvement as REJECTED",
-            executed_at=datetime.now(timezone.utc),
+            executed_at=datetime.now(UTC),
             success=True,
         )
 
@@ -262,10 +265,10 @@ class Gate5ReleaseAudit:
     def approve(improvement: Improvement, approver: str) -> None:
         """人工确认"""
         improvement.human_approver = approver
-        improvement.human_approved_at = datetime.now(timezone.utc)
+        improvement.human_approved_at = datetime.now(UTC)
 
 # ── GatePlugin registration ──────────────────────────────
 from .interface import register_gate
-from .models import GateName
+
 register_gate(GateName.GATE5, Gate5ReleaseAudit)
 

@@ -24,7 +24,7 @@ except ImportError:
     _STRUCTLOG = False
 
 
-class BudgetExceeded(Exception):
+class BudgetExceeded(Exception):  # noqa: N818
     """预算超支异常。"""
 
     def __init__(self, reason: str, report: dict[str, Any]):

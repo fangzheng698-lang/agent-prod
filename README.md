@@ -1,117 +1,174 @@
-# agent-prod — Enterprise AI Agent Framework v0.2.0
+# agent-prod — Enterprise AI Agent Quality Gate Infrastructure
 
-**Production-grade agent runtime skeleton with plug-in quality gates, causal attribution, and data flywheel.**
+**生产级 AI Agent 质量门禁系统。** 任何 agent（Hermes、Claude Code、自研）都可以通过一行代码接入，经过 7 道质量门评估，决定是否发布到生产环境。
 
 ```
 agent_prod/
-├── agent/          Core runtime — AgentRuntime, LLMClient, ToolRegistry, Budget
-├── gates/          Quality gates plug-in system — GatePlugin ABC + 5 built-in gates
-│   ├── interface.py    ← THE STANDARD: subclass GatePlugin to add a gate
-│   ├── gate1_execution.py    Structured output contract validation
-│   ├── gate2_trace.py        LLM↔tool trace integrity
-│   ├── gate3_regression.py   Output quality monitoring
-│   ├── gate4_gray.py         Gradual traffic ramp
-│   └── gate5_audit.py        Policy-as-code release audit
-├── gateway/        Bridge: AgentRuntime output → QualityGateEngine pipeline
-├── server/         FastAPI REST API (OpenAI-compatible /v1/chat/completions)
-├── observability/  Embedded Prometheus metrics + structured execution logging
-├── adaptivity/     Causal attribution (Granger + counterfactual) + data flywheel
-├── lifecycle/      Session state machine + cross-session memory
-├── testing/        Benchmark, replay, profiling, stress testing
-└── ingest/         Real session ingestion pipelines
+├── gates/          7 道质量门 (Gate0-Gate6)
+├── server/         FastAPI REST API 服务
+├── gateway/        评估管道编排
+├── integration/    qclaw 等外部 agent 集成
+├── adaptivity/     数据飞轮 + 因果归因
+├── observability/  指标 + 日志
+└── trace_client.py 一行代码 SDK
 ```
 
-## Quickstart
+## 快速开始
 
 ```bash
 pip install agent-prod
-agent-prod init          # interactive setup wizard
-agent-prod serve         # start the server
-```
 
-```bash
-curl -X POST http://localhost:8000/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{"messages":[{"role":"user","content":"Hello"}],"stream":false}'
-```
+# 交互式配置 (LLM endpoint、API key、Gate0 模式)
+agent-prod configure
 
-Response includes per-gate results:
-
-```json
-{
-  "id": "ses_abc123",
-  "quality_gate": {
-    "status": "production",
-    "passed": true,
-    "gates": [
-      {"gate": "gate1_execution", "passed": true, "reason": "Output matches ExecutionOutput contract"},
-      {"gate": "gate2_trace_integrity", "passed": true, "reason": "Trace DAG verified"},
-      {"gate": "gate3_regression", "passed": true, "reason": "No regression detected"},
-      {"gate": "gate4_gray_release", "passed": true, "reason": "Gray release OK"},
-      {"gate": "gate5_release_audit", "passed": true, "reason": "All policies passed"}
-    ]
-  }
-}
-```
-
-## Architecture
-
-### Gate Plugin Standard (the key differentiator)
-
-Every gate implements the `GatePlugin` ABC:
-
-```python
-class GatePlugin(ABC):
-    name: GateName
-
-    @abstractmethod
-    def verify(self, improvement: Improvement) -> GateResult: ...
-    @abstractmethod
-    def rollback(self, improvement: Improvement) -> None: ...
-    @classmethod
-    @abstractmethod
-    def from_config(cls, config: dict, name: GateName) -> "GatePlugin": ...
-```
-
-To add a custom gate, subclass `GatePlugin`, call `register_gate()` on import, and add it to the pipeline order in config. No engine changes needed.
-
-### Configuration Cascade
-
-```
-config.yaml  >  .env  >  environment variables
-     ↑
-   quality_gates:
-     gate1: {threshold: 0.95}
-     gate3: {prompt_diff: 0.3, content_diff: 0.5}
-     gate4: {traffic_steps: [1,10,50,100]}
-     ...
-```
-
-## Accumulate Real Data
-
-```bash
-# Ingest Hermes session history
-python -m agent_prod.ingest.hermes_sessions --recent 50
-
-# Run causal attribution on ingested data
-python -m agent_prod.adaptivity.causal_attributor data/execution_log.jsonl
-```
-
-## Extras
-
-```bash
-pip install "agent-prod[all]"        # everything (Postgres, Prometheus, Jaeger, Unleash)
-pip install "agent-prod[postgres]"   # just Postgres persistence
-```
-
-Production mode:
-
-```bash
-export QUALITY_GATES_MODE=production
-export DATABASE_URL=postgresql+asyncpg://localhost/agent_prod
+# 启动服务
 agent-prod serve
 ```
 
-## Version
+## 自研 Agent 接入（一行代码）
 
-0.2.0 — Skeleton release. Phase 1-11 modules refactored into layered package structure with GatePlugin plug-in interface as public API contract.
+任何 agent 都可以通过 `trace()` 函数提交数据到门禁系统：
+
+```python
+from agent_prod import trace
+
+result = trace(
+    agent="my-custom-agent",        # ← 你的 agent 名字
+    session_id="session_001",
+    decisions=[{
+        "decision_id": "d1",
+        "model": "gpt-4",
+        "prompt_tokens": 100,
+        "completion_tokens": 50,
+        "tool_calls": [{
+            "tool_id": "t1",
+            "tool_name": "search",
+            "arguments": {"query": "weather"},
+            "result_summary": "Sunny, 22C",
+            "success": True,
+            "duration_ms": 120.0,
+        }],
+    }],
+    current_metrics={
+        "final_response": "Sunny, 22C",
+        "latency_p95_ms": 300,
+        "success_rate": 0.99,
+    },
+)
+
+if result["passed"]:
+    print("门禁通过 → 生产发布")
+else:
+    print(f"被拒绝: {result['failed_at']} - {result['fail_reason']}")
+```
+
+## CLI 命令
+
+```bash
+# ── 配置 ──
+agent-prod configure                  # 交互式配置向导
+agent-prod configure --show           # 查看当前配置
+agent-prod configure --reset          # 重置为默认配置
+
+# ── 服务 ──
+agent-prod serve                      # 启动服务
+agent-prod doctor                     # 健康检查
+
+# ── 统计 ──
+agent-prod stats                      # 所有 agent 的门禁统计
+agent-prod stats --agent qclaw        # 按 agent 筛选
+agent-prod stats --agent "qclaw,claude-code,my-agent"  # 多 agent
+agent-prod stats --rejected           # 只看被拒绝的
+agent-prod stats --detail <id>        # 查看单条评估详情
+
+# ── 飞轮反馈 ──
+agent-prod feedback                   # 查看改进建议列表
+agent-prod feedback --id <id>         # 查看详情
+agent-prod feedback --apply <id>      # 应用改进建议
+
+# ── 监控 ──
+agent-prod watch                      # 启动会话监控
+```
+
+## 配置说明
+
+### LLM 配置 (Gate6 评估用)
+
+```bash
+agent-prod configure
+# 依次输入：
+#   LLM API endpoint URL
+#   LLM model name
+#   API key
+```
+
+### Gate0 权限模式
+
+每个 agent 可以单独设置模式：
+
+| 模式 | 行为 |
+|---|---|
+| `observe` | 记录违规但不拦截（推荐：新 agent 接入时） |
+| `enforce` | 拦截违规工具调用（推荐：稳定后开启） |
+
+配置方式：
+```bash
+# 交互式配置时会逐 agent 询问
+agent-prod configure
+```
+
+或直接编辑 config.yaml：
+```yaml
+gates:
+  gate0:
+    per_agent:
+      my-agent:
+        mode: observe   # 或 enforce
+```
+
+### 工具别名
+
+如果自研 agent 的工具名与内置规范名不同，需要配置别名：
+
+```yaml
+tools:
+  aliases:
+    my-agent:
+      my_run_shell: terminal     # 映射为危险操作
+      my_read_file: read_file    # 映射为安全操作
+```
+
+## 7 道质量门
+
+| Gate | 名称 | 作用 |
+|---|---|---|
+| Gate0 | 权限 | 工具调用 ACL，观察/拦截模式 |
+| Gate1 | 预算 | Token 和时间预算检查 + 熔断 |
+| Gate2 | 追踪完整性 | LLM ↔ 工具调用 DAG 完整性 |
+| Gate3 | 回归检测 | 对比历史基线，检测性能回退 |
+| Gate4 | 灰度发布 | 流量逐步放量 |
+| Gate5 | 审计 | 发布合规审计 |
+| Gate6 | 答案质量 | LLM 评估答案质量（12 项检查清单） |
+
+## 安装
+
+```bash
+# 基础安装
+pip install agent-prod
+
+# 完整安装（Postgres、Prometheus、Jaeger、Unleash）
+pip install "agent-prod[all]"
+```
+
+## 环境变量
+
+| 变量 | 默认值 | 说明 |
+|---|---|---|
+| `AGENT_PROD_URL` | `http://localhost:8000` | 服务地址 |
+| `AGENT_PROD_API_KEY` | - | API 密钥 |
+| `OPENAI_API_KEY` | - | LLM 评估用 API key |
+| `QUALITY_GATES_MODE` | `memory` | `memory` 或 `production` |
+
+## 版本
+
+0.5.0

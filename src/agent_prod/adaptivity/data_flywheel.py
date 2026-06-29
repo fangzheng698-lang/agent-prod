@@ -16,16 +16,12 @@
 
 from __future__ import annotations
 
-import json
 import math
 import os
-from datetime import datetime, timezone
-from typing import Optional
 
 from pydantic import BaseModel, Field
 
 from agent_prod.observability.execution_log import ExecutionLogRecord
-
 
 # ═══════════════════════════════════════════
 # Statistical Functions
@@ -121,7 +117,6 @@ def _t_pvalue(t: float, df: float) -> float:
     a = df / 2.0
     b = 0.5
     # Use the relationship with beta incomplete
-    import math
     p = _betai(a, b, x)
     return p
 
@@ -304,7 +299,7 @@ class FlywheelReport(BaseModel):
         return d
 
     @classmethod
-    def from_dict(cls, d: dict) -> "FlywheelReport":
+    def from_dict(cls, d: dict) -> FlywheelReport:
         return cls(**d)
 
 
@@ -357,7 +352,7 @@ class FlywheelEngine:
         records = []
         if not os.path.exists(self._log_path):
             return records
-        with open(self._log_path, "r") as f:
+        with open(self._log_path) as f:
             for line in f:
                 try:
                     records.append(ExecutionLogRecord.model_validate_json(line.strip()))
@@ -479,7 +474,7 @@ class FlywheelEngine:
             suggestions.append(FlywheelSuggestion(
                 category="optimization", severity="info",
                 title="Significant token efficiency improvement — update baseline",
-                description=f"Tokens reduced, consider saving as new baseline",
+                description="Tokens reduced, consider saving as new baseline",
                 current_value=f"{new_tok:.0f} tokens",
                 suggested_value="Run establish_baseline() to lock in gains",
                 confidence=0.85,
@@ -491,7 +486,12 @@ class FlywheelEngine:
 def compute_baseline(records: list[ExecutionLogRecord]) -> dict:
     """从历史记录计算统计基线。"""
     if not records:
-        return {"sample_count": 0, "avg_tokens": 0}
+        return {
+            "sample_count": 0,
+            "avg_tokens": 0, "token_std": 0, "token_p50": 0, "token_p95": 0,
+            "avg_duration_ms": 0, "duration_std": 0, "duration_p50": 0, "duration_p95": 0,
+            "avg_turns": 0, "turns_std": 0, "gate_pass_rate": 0.0,
+        }
 
     tokens = []
     durations = []

@@ -62,4 +62,9 @@ class HealthResponse(BaseModel):
     status: str = "ok"
     model: str = ""
     sessions_active: int = 0
-    quality_gates: bool = False  # Phase 3: 门禁是否已启用
+    quality_gates: bool = False
+    repository: bool = False
+    auth_enabled: bool = False
+    rate_limit_enabled: bool = False
+    watchdog_active: bool = False
+    gate1_degraded: bool = False

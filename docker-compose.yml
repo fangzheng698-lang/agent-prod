@@ -1,159 +1,19 @@
-# ── Phase 8.3: 完整生产部署编排 ───────────────────────────────
-# docker compose up -d 即可拉起全部后端服务
-#
-# 架构:
-#   agent-prod (8000) → OTLP(4317) → Jaeger (16686 /query)
-#   agent-prod (8000) → PostgreSQL (5432)
-#   agent-prod (8000) → Unleash (4242)
-#   agent-prod (8000) → Prometheus (9090) ← Pushgateway (9091)
-#
-# 服务列表:
-#   1. agent-prod   — Agent API 服务 (主服务)
-#   2. postgres     — PostgreSQL 16 (数据库)
-#   3. prometheus   — 指标收集与查询
-#   4. pushgateway  — 指标推送桥梁
-#   5. jaeger       — 分布式追踪 (OTLP)
-#   6. unleash      — Feature Flag 中心
-#
-# 健康检查顺序: postgres → unleash (依赖 postgres) → agent-prod → 其他
-# 启动顺序: docker compose up -d postgres && sleep 5 && docker compose up -d
+version: "3.8"
 
 services:
-  # ── agent-prod: 主服务 ───────────────────────────────────────
   agent-prod:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile
+    build: .
     image: agent-prod:latest
-    container_name: agent-prod
     ports:
       - "8000:8000"
     environment:
-      # LLM 配置
+      - QUALITY_GATES_MODE=memory
+      - QUALITY_GATES_ENABLED=true
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.openai.com/v1}
-      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}
-      # 服务器
-      - HOST=0.0.0.0
-      - PORT=8000
-      # 数据库
-      - DATABASE_URL=sqlite+aiosqlite:///./data/agent.db
-      # Agent 配置
-      - MAX_TURNS=50
-      - MAX_TOKENS=100000
-      # Quality Gates
-      - QUALITY_GATES_ENABLED=${QUALITY_GATES_ENABLED:-false}
-      - QUALITY_GATES_CONFIG=quality_gates/config.yaml
-      - QUALITY_GATES_MODE=${QUALITY_GATES_MODE:-memory}
-    volumes:
-      - agent_data:/app/data
-      - ./quality_gates/config.yaml:/app/quality_gates/config.yaml:ro
-    depends_on:
-      postgres:
-        condition: service_healthy
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-}
+    restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:8000/health"]
-      interval: 15s
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 30s
       timeout: 5s
-      retries: 5
-      start_period: 15s
-    restart: unless-stopped
-    networks:
-      - agent-net
-
-  # ── PostgreSQL 16 ────────────────────────────────────────────
-  postgres:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_USER: quality_gates
-      POSTGRES_PASSWORD: quality_gates
-      POSTGRES_DB: quality_gates
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./infra/init.sql:/docker-entrypoint-initdb.d/init.sql
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U quality_gates -d quality_gates"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-      start_period: 5s
-    restart: unless-stopped
-    networks:
-      - agent-net
-
-  # ── Prometheus ───────────────────────────────────────────────
-  prometheus:
-    image: prom/prometheus:latest
-    ports:
-      - "9090:9090"
-    volumes:
-      - ./infra/prometheus.yml:/etc/prometheus/prometheus.yml
-      - prometheus_data:/prometheus
-    command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-      - '--web.enable-lifecycle'
-    restart: unless-stopped
-    networks:
-      - agent-net
-
-  # ── Pushgateway (指标写入桥梁) ─────────────────────────────
-  pushgateway:
-    image: prom/pushgateway:latest
-    ports:
-      - "9091:9091"
-    restart: unless-stopped
-    networks:
-      - agent-net
-
-  # ── Jaeger all-in-one (OTLP 接收 + 查询) ────────────────────
-  jaeger:
-    image: jaegertracing/all-in-one:latest
-    user: "0:0"
-    environment:
-      - COLLECTOR_OTLP_ENABLED=true
-      - SPAN_STORAGE_TYPE=badger
-      - BADGER_EPHEMERAL=false
-      - BADGER_DIRECTORY_KEY=/badger/data
-      - BADGER_DIRECTORY_VALUE=/badger/data
-    ports:
-      - "16686:16686"   # Query UI
-      - "4317:4317"     # OTLP gRPC
-      - "4318:4318"     # OTLP HTTP
-    volumes:
-      - jaeger_data:/badger
-    restart: unless-stopped
-    networks:
-      - agent-net
-
-  # ── Unleash Feature Flag 中心 ────────────────────────────────
-  unleash:
-    image: unleashorg/unleash-server:6
-    environment:
-      DATABASE_URL: "postgres://quality_gates:quality_gates@postgres:5432/unleash"
-      DATABASE_SSL: "false"
-      # Unleash v6: 初始化密码
-      INIT_ADMIN_PASSWORD: "admin123"
-      # 开发环境：禁用认证
-      AUTH_TYPE: "none"
-      UNLEASH_DEFAULT_ADMIN_API_TOKEN: "default:development.unleash-insecure-api-token"
-    ports:
-      - "4242:4242"
-    depends_on:
-      postgres:
-        condition: service_healthy
-    restart: unless-stopped
-    networks:
-      - agent-net
-
-volumes:
-  agent_data:
-  postgres_data:
-  prometheus_data:
-  jaeger_data:
-
-networks:
-  agent-net:
-    driver: bridge
+      retries: 3

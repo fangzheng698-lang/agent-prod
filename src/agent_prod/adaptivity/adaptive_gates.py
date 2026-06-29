@@ -21,10 +21,8 @@ from __future__ import annotations
 
 import math
 from collections import deque
-from typing import Optional
 
 from pydantic import BaseModel, Field
-
 
 # ═══════════════════════════════════════════
 # Statistical helpers
@@ -140,7 +138,7 @@ class GateThreshold(BaseModel):
         return self.model_dump()
 
     @classmethod
-    def from_dict(cls, d: dict) -> "GateThreshold":
+    def from_dict(cls, d: dict) -> GateThreshold:
         return cls(**d)
 
 

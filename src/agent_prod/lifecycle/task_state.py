@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 
@@ -73,7 +73,7 @@ class TaskRun:
         self.run_id = run_id or f"run_{uuid.uuid4().hex[:12]}"
         self.session_id = session_id
         self.state = TaskState.PENDING
-        self.created_at = datetime.now(timezone.utc)
+        self.created_at = datetime.now(UTC)
         self.updated_at = self.created_at
         self.gate_status: str | None = None
         self.error: str | None = None
@@ -87,7 +87,7 @@ class TaskRun:
 
         old_state = self.state
         self.state = target
-        self.updated_at = datetime.now(timezone.utc)
+        self.updated_at = datetime.now(UTC)
 
         entry = {
             "from": old_state.value,

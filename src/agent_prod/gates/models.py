@@ -2,9 +2,9 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -16,17 +16,23 @@ class ImprovementStatus(str, Enum):
     GATE2_PASSED = "gate2_passed"    # 轨迹完整性通过
     GATE3_PASSED = "gate3_passed"    # 回归验证通过
     GATE4_PASSED = "gate4_passed"    # 灰度放行通过
+    GATE5_PASSED = "gate5_passed"    # 审批通过
+    GATE6_PASSED = "gate6_passed"    # 答案质量验证通过
+    GATE7_PASSED = "gate7_passed"    # 执行一致性验证通过
     PRODUCTION = "production"        # 正式上线
     REJECTED = "rejected"            # 被拒绝
     ROLLED_BACK = "rolled_back"      # 已回滚
 
-
 class GateName(str, Enum):
+    """质量门名称"""
+    GATE0 = "gate0_permission"
     GATE1 = "gate1_execution"
     GATE2 = "gate2_trace_integrity"
     GATE3 = "gate3_regression"
     GATE4 = "gate4_gray_release"
     GATE5 = "gate5_release_audit"
+    GATE6 = "gate6_answer_quality"
+    GATE7 = "gate7_execution_consistency"
 
 
 class RollbackLevel(int, Enum):
@@ -44,7 +50,7 @@ class GateResult(BaseModel):
     reason: str = ""
     details: dict[str, Any] = Field(default_factory=dict)
     duration_ms: float = 0.0
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     def to_summary(self) -> str:
         status = "✅ PASS" if self.passed else "❌ FAIL"
@@ -57,7 +63,7 @@ class RollbackPlan(BaseModel):
     scope: str = ""
     estimated_seconds: int = 5
     procedure: str = ""
-    executed_at: Optional[datetime] = None
+    executed_at: datetime | None = None
     success: bool = False
 
 
@@ -68,8 +74,8 @@ class Improvement(BaseModel):
     status: ImprovementStatus = ImprovementStatus.CANDIDATE
 
     # 持久化追踪
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     # 输入数据
@@ -97,27 +103,27 @@ class Improvement(BaseModel):
     fail_reason: str = ""
     rollback_plan: RollbackPlan = Field(default_factory=RollbackPlan)
     human_approver: str = ""
-    human_approved_at: Optional[datetime] = None
+    human_approved_at: datetime | None = None
 
     # Pydantic V2 序列化配置
     model_config = {"extra": "ignore", "ser_json_timedelta": "iso8601"}
 
     def mark_updated(self) -> None:
-        self.updated_at = datetime.now(timezone.utc)
+        self.updated_at = datetime.now(UTC)
 
     def add_result(self, result: GateResult) -> None:
         self.gate_results.append(result)
         if result.passed:
-            # 自动推进状态
             status_map = {
                 GateName.GATE1: ImprovementStatus.GATE1_PASSED,
                 GateName.GATE2: ImprovementStatus.GATE2_PASSED,
                 GateName.GATE3: ImprovementStatus.GATE3_PASSED,
                 GateName.GATE4: ImprovementStatus.GATE4_PASSED,
+                GateName.GATE6: ImprovementStatus.GATE6_PASSED,
             }
             if result.gate_name in status_map:
                 self.status = status_map[result.gate_name]
-            if result.gate_name == GateName.GATE5 and result.passed:
+            if result.gate_name == GateName.GATE6 and result.passed:
                 self.status = ImprovementStatus.PRODUCTION
         else:
             self.fail_gate = result.gate_name

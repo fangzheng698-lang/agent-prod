@@ -11,11 +11,9 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
 from pydantic import BaseModel, Field
 
-from agent_prod.observability.execution_log import ExecutionLogRecord, ExecutionLogger
+from agent_prod.observability.execution_log import ExecutionLogger, ExecutionLogRecord
 
 
 class EvalReport(BaseModel):
@@ -35,10 +33,10 @@ class EvalReport(BaseModel):
 class EvaluationLoop:
     """评估循环——加载日志并对比两个版本。"""
 
-    def __init__(self, logger: Optional[ExecutionLogger] = None):
+    def __init__(self, logger: ExecutionLogger | None = None):
         self._logger = logger or ExecutionLogger()
 
-    def load_logs(self, session_id: Optional[str] = None) -> list[ExecutionLogRecord]:
+    def load_logs(self, session_id: str | None = None) -> list[ExecutionLogRecord]:
         """从日志加载执行记录。"""
         return self._logger.query_log(session_id=session_id)
 

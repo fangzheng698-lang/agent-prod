@@ -1,17 +1,47 @@
+"""agent-prod — Enterprise-grade AI agent quality gate infrastructure.
+
+Quick start for any agent (one line of code):
+
+    from agent_prod import trace
+
+    result = trace(
+        agent="my-custom-agent",
+        session_id="ses_001",
+        decisions=[{
+            "decision_id": "d1",
+            "model": "gpt-4",
+            "prompt_tokens": 100,
+            "completion_tokens": 50,
+            "tool_calls": [{
+                "tool_id": "t1",
+                "tool_name": "search",
+                "arguments": {"query": "weather"},
+                "result_summary": "Sunny, 22C",
+                "success": True,
+                "duration_ms": 120.0,
+            }],
+        }],
+        current_metrics={
+            "latency_p95_ms": 300,
+            "success_rate": 0.99,
+            "final_response": "Sunny, 22C",
+        },
+        traffic_percentage=100,
+    )
+
+    if result["passed"]:
+        print("All gates passed -> production")
+    else:
+        print(f"Rejected at {result['failed_at']}: {result['fail_reason']}")
 """
-agent-prod — Enterprise-grade AI agent framework.
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Layered architecture:
+__version__ = "0.5.0"
 
-    agent/          Core agent runtime (AgentRuntime, LLMClient, ToolRegistry)
-    gates/          Quality gates plug-in system (GatePlugin ABC → 5 built-in gates)
-    gateway/        Bridges agent execution to quality gate pipeline
-    server/         FastAPI server layer (REST API, config, state)
-    observability/  Embedded metrics + execution logging
-    adaptivity/     Self-improving layer (adaptive gates, data flywheel, causal attribution)
-    testing/        Evaluation infrastructure (benchmark, replay, profiling)
-    lifecycle/      Session & memory lifecycle management
-"""
+# Public SDK
+from agent_prod.client import AgentProdClient, AgentProdError, to_agent_trace  # noqa: F401
+from agent_prod.trace_client import trace, quick, health, evaluate_batch  # noqa: F401
 
-__version__ = "0.2.0"
+__all__ = [
+    "AgentProdClient", "AgentProdError", "to_agent_trace",
+    "trace", "quick", "health", "evaluate_batch",
+]

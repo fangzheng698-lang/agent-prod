@@ -1,4 +1,9 @@
-"""Phase 7.1: LoopEngine — 三层闭环架构。
+"""Phase 7.1: LoopEngine — 三层闭环架构 (DEPRECATED — use LoopOrchestrator).
+
+.. deprecated::
+    This module is deprecated. Use `agent_prod.adaptivity.loop_orchestrator.LoopOrchestrator`
+    instead, which provides a full 4-phase closed loop with 11-state state machine,
+    replay, benchmark, gate stress, and governance.
 
 Execution → Optimization → Release 三层连成闭环:
 
@@ -19,8 +24,10 @@ Execution → Optimization → Release 三层连成闭环:
 
 from __future__ import annotations
 
+import warnings
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any
 
 
 @dataclass
@@ -64,7 +71,10 @@ class ReleaseDecision:
 
 
 class LoopEngine:
-    """三层闭环引擎 — Execution → Optimization → Release 的顶层编排。
+    """三层闭环引擎 — Execution → Optimization → Release 的顶层编排 (DEPRECATED).
+
+    .. deprecated::
+        Use LoopOrchestrator from agent_prod.adaptivity.loop_orchestrator instead.
 
     使用回调模式解耦各层：
         - response_fn: 模拟/转发 LLM 调用
@@ -72,6 +82,12 @@ class LoopEngine:
     """
 
     def __init__(self, name: str):
+        warnings.warn(
+            "LoopEngine is deprecated. Use LoopOrchestrator from "
+            "agent_prod.adaptivity.loop_orchestrator instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self.name = name
         self.execution_count = 0
         self._history: list[ExecutionResult] = []

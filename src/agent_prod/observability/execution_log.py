@@ -12,11 +12,8 @@
 
 from __future__ import annotations
 
-import json
-import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -38,7 +35,7 @@ class ExecutionLogRecord(BaseModel):
     quality_gate_result: dict = Field(default_factory=dict)
     duration_ms: float = 0.0
     created_at: str = Field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat(),
+        default_factory=lambda: datetime.now(UTC).isoformat(),
         validation_alias="timestamp",
         serialization_alias="created_at",
     )
@@ -65,8 +62,8 @@ class ExecutionLogger:
 
     def query_log(
         self,
-        session_id: Optional[str] = None,
-        date_range: Optional[tuple[str, str]] = None,
+        session_id: str | None = None,
+        date_range: tuple[str, str] | None = None,
     ) -> list[ExecutionLogRecord]:
         """查询执行日志。
 
@@ -81,7 +78,7 @@ class ExecutionLogger:
             return []
 
         results: list[ExecutionLogRecord] = []
-        with open(self._file_path, "r") as f:
+        with open(self._file_path) as f:
             for line in f:
                 line = line.strip()
                 if not line:
@@ -136,7 +133,7 @@ class ExecutionLogger:
         gate_passed = 0
         sessions: set[str] = set()
 
-        with open(self._file_path, "r") as f:
+        with open(self._file_path) as f:
             for line in f:
                 line = line.strip()
                 if not line:
@@ -170,7 +167,7 @@ class ExecutionLogger:
 
 # ── Module-level convenience functions ──
 
-_default_logger: Optional[ExecutionLogger] = None
+_default_logger: ExecutionLogger | None = None
 
 
 def _get_default_logger() -> ExecutionLogger:
@@ -186,8 +183,8 @@ def log_execution(record: ExecutionLogRecord) -> None:
 
 
 def query_log(
-    session_id: Optional[str] = None,
-    date_range: Optional[tuple[str, str]] = None,
+    session_id: str | None = None,
+    date_range: tuple[str, str] | None = None,
 ) -> list[ExecutionLogRecord]:
     """模块级便捷函数：查询执行日志。"""
     return _get_default_logger().query_log(session_id, date_range)

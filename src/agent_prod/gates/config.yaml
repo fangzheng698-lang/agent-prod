@@ -1,68 +1,215 @@
-# ── Quality Gates Configuration ──────────────────────────────────
-# Phase 1: 阈值外部化 + 基础设施地址配置 ✅ 已完成
-# Phase 2: 去掉以下注释即可接入真实基础设施
-#
-# ╔══════════════════════════════════════════════════════════════╗
-# ║  生产模式：Phase 2 ✅ 已启用                                  ║
-# ║  1. observability.otel.enabled: true           ✅ OTel 真实追踪║
-# ║  2. observability.metrics.provider: "prometheus" ✅ Prometheus ║
-# ║  3. storage.backend: "postgres"                ✅ PostgreSQL  ║
-# ╚══════════════════════════════════════════════════════════════╝
-
+alerts:
+  alert_on: gategate7
+  enabled: true
+  webhook_url: https://hooks.example.com/alert
 gates:
-  gate1:
-    execution_time_tolerance: 1.2        # 执行时间超出预算的容忍系数
-    token_tolerance: 1.1                 # Token 超出预算的容忍系数
-    consecutive_failures_before_escalation: 3
-    circuit_breaker_cooldown_seconds: 60.0
-
-  gate3:
-    regress_pct: 0.95                     # 不低于基线的 95%
-    perf_degradation_limit: 0.05          # 性能退化不超过 5%
-    repeatability_threshold: 0.1
-    repeatability_runs: 3
-    unstable_retry_count: 5
-
-  gate4:
-    error_rate_increase: 0.01            # 灰度组 vs 基线组，错误率上升不超过 1%
-    latency_increase: 0.10               # P95 延迟上升不超过 10%
-    resource_increase: 0.15              # 资源消耗上升不超过 15%
-    stable_period_seconds: 60            # 每个阶梯观察期（生产环境分钟级）
+  auto_fix:
+    cooldown_minutes: 5
+    enabled: true
+    max_retries: 3
+    stage_error_threshold: 0.02
+    stage_min_duration_seconds: 0.1
     stages:
-      1: {traffic_pct: 1,  observe_cycles: 2, label: "1%"}
-      2: {traffic_pct: 10, observe_cycles: 4, label: "10%"}
-      3: {traffic_pct: 50, observe_cycles: 6, label: "50%"}
-      4: {traffic_pct: 100, observe_cycles: 0, label: "100%"}
-
-storage:
-  # backend: file | postgres | memory
-  backend: "postgres"                    # Phase 2: 生产模式 PostgreSQL
-  file_path: "/var/lib/quality_gates/improvements.json"
-  postgres:
-    dsn: "postgresql://quality_gates:quality_gates@localhost:5432/quality_gates"
-    pool_size: 5
-
-observability:
-  # OpenTelemetry
-  otel:
-    endpoint: "http://localhost:4317"     # OTLP gRPC endpoint
-    service_name: "loop-engineer"
-    enabled: true                         # Phase 2: 生产模式 ON
-    jaeger_url: "http://localhost:16686"  # Jaeger Query API
-  # Metrics (Prometheus)
-  metrics:
-    provider: "prometheus"                # Phase 2: 真实 Prometheus 查询
-    prometheus_url: "http://localhost:9090"
-    timeout_seconds: 5.0
-  # Feature Flags
-  unleash:
-    url: "http://localhost:4242"
-    api_token: "default:development.unleash-insecure-api-token"
-    environment: "production"
-    app_name: "quality-gates"
-
+      '1':
+        label: 1%
+        observe_cycles: 2
+        traffic_pct: 1
+      '2':
+        label: 10%
+        observe_cycles: 4
+        traffic_pct: 10
+      '3':
+        label: 50%
+        observe_cycles: 6
+        traffic_pct: 50
+      '4':
+        label: 100%
+        observe_cycles: 0
+        traffic_pct: 100
+    stateful: true
+  gate0:
+    agent_acl: {}
+    per_agent:
+      architect-agent:
+        mode: observe
+      claude-code:
+        mode: observe
+      code-reviewer:
+        mode: observe
+      coder-agent:
+        mode: observe
+      data-analyzer:
+        mode: observe
+      data-cleaner:
+        mode: observe
+      data-collector:
+        mode: observe
+      malicious-agent:
+        mode: observe
+      qa-simple-tester:
+        mode: observe
+      qclaw:
+        mode: observe
+      regression-test-agent:
+        mode: observe
+      reviewer-agent:
+        mode: observe
+    skip_arg_inspection: false
+  gate1:
+    budgets:
+      claude-code:
+        time_budget_ms: 600000
+        token_budget: 20000
+      codex:
+        time_budget_ms: 600000
+        token_budget: 15000
+      default:
+        time_budget_ms: 9000000
+        token_budget: 10000
+      hermes:
+        time_budget_ms: 8755070
+        token_budget: 9972
+      opencode:
+        time_budget_ms: 600000
+        token_budget: 15000
+    circuit_breaker_cooldown_seconds: 60.0
+    consecutive_failures_before_escalation: 3
+    execution_time_tolerance: 1.2
+    token_tolerance: 1.1
+  gate3:
+    auto_evolve_baseline: true
+    baseline_min_samples: 5
+    baseline_window: 20
+    dynamic_baseline: true
+    per_agent:
+      claude-code:
+        perf_degradation_limit: 0.05
+        regress_pct: 0.97
+      codex:
+        perf_degradation_limit: 0.05
+        regress_pct: 0.95
+      hermes:
+        perf_degradation_limit: 0.08
+        regress_pct: 0.93
+      opencode:
+        perf_degradation_limit: 0.06
+        regress_pct: 0.95
+    perf_degradation_limit: 0.05
+    regress_pct: 0.95
+    repeatability_runs: 3
+    repeatability_threshold: 0.1
+    unstable_retry_count: 5
+  gate4:
+    error_rate_increase: 0.01
+    latency_increase: 0.1
+    resource_increase: 0.15
+    stable_period_seconds: 60
+  gate6:
+    enabled: true
+    evaluator: checklist
+    fallback_on_timeout: pass
+    llm_endpoint: https://ai-api-gateway.app.baizhi.cloud/api/openai
+    llm_model: lite/qwen-flash
+    pass_threshold: 0.58
+    per_agent:
+      claude-code:
+        pass_threshold: 0.67
+      codex:
+        pass_threshold: 0.58
+      hermes:
+        pass_threshold: 0.58
+      opencode:
+        pass_threshold: 0.58
+    timeout_seconds: 60.0
+  gate7:
+    mode: observe
+    per_agent:
+      long-running-agent:
+        mode: enforce
+  mode: memory
 logging:
-  format: "json"                          # json | console
-  level: "INFO"
-  output: "stdout"                        # stdout | file
-  file_path: "/var/log/quality_gates/gates.log"
+  format: json
+  level: INFO
+  output: stdout
+observability:
+  metrics:
+    prometheus_url: http://localhost:9090
+    provider: demo
+    timeout_seconds: 5.0
+  otel:
+    enabled: false
+    endpoint: http://localhost:4317
+    service_name: agent-prod
+sandbox:
+  path_blacklist:
+  - /etc/passwd
+  - /etc/shadow
+  - /etc/sudoers
+  path_whitelist:
+  - /tmp/
+  - /var/tmp/
+storage:
+  backend: memory
+  file_path: ./data/improvements.json
+tools:
+  aliases:
+    claude-code:
+      Agent: delegate_task
+      Bash: terminal
+      Edit: patch
+      Read: read_file
+      TaskCreate: todo
+      Think: todo
+      Write: write_file
+    codex:
+      bash: terminal
+      read: read_file
+      write: write_file
+    qclaw:
+      edit: patch
+      exec: terminal
+      read: read_file
+      write: write_file
+  risk:
+    benign:
+    - read_file
+    - search_files
+    - session_search
+    - skills_list
+    - skill_view
+    - memory
+    - vision_analyze
+    - browser_navigate
+    - browser_snapshot
+    - browser_console
+    - browser_vision
+    - browser_get_images
+    - browser_scroll
+    - browser_back
+    - web_search
+    - process_poll
+    - process_log
+    - process_list
+    - process
+    - todo
+    - execute_code
+    dangerous:
+    - terminal
+    - shell_exec
+    - process_kill
+    - process_wait
+    - process_submit
+    - process_write
+    - process_close
+    - send_message
+    - delegate_task
+    - cronjob
+    - clarify
+    elevated:
+    - write_file
+    - patch
+    - skill_manage
+    - browser_click
+    - browser_type
+    - browser_press
+    - text_to_speech

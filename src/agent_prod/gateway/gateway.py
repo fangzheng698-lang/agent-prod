@@ -13,15 +13,47 @@ from __future__ import annotations
 import asyncio
 import logging
 from pathlib import Path
-from typing import Optional
 
-from agent_prod.gates.models import Improvement, ImprovementStatus, GateName, GateResult
 from agent_prod.gates.engine import QualityGateEngine
+from agent_prod.gates.models import Improvement, ImprovementStatus
 
 logger = logging.getLogger(__name__)
 
 # Package root — used to resolve relative config paths
 _PKG_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _serialize_decisions(decisions: list) -> list[dict]:
+    """将 AgentTrace Decision 列表序列化为 dict，供 Gate0 权限检查使用。
+
+    gate0_permission 需要: decisions[i]["tool_calls"][j]["tool_name"]
+    """
+    result = []
+    for d in decisions:
+        # d can be a Decision dataclass or a dict already
+        if isinstance(d, dict):
+            decision_id = d.get("decision_id", "")
+            tool_calls = d.get("tool_calls", [])
+        else:
+            decision_id = getattr(d, "decision_id", "")
+            tool_calls = getattr(d, "tool_calls", [])
+
+        tc_dicts = []
+        for tc in tool_calls:
+            if isinstance(tc, dict):
+                tc_dicts.append(tc)
+            else:
+                tc_dicts.append({
+                    "tool_id": getattr(tc, "tool_id", ""),
+                    "tool_name": getattr(tc, "tool_name", ""),
+                    "success": getattr(tc, "success", True),
+                    "arguments": getattr(tc, "arguments", {}),
+                })
+        result.append({
+            "decision_id": decision_id,
+            "tool_calls": tc_dicts,
+        })
+    return result
 
 
 class QualityGateGateway:
@@ -35,21 +67,24 @@ class QualityGateGateway:
         self._engine = engine
 
     @classmethod
-    def from_config(cls, config_path: str | Path | None = None) -> "QualityGateGateway":
+    def from_config(cls, config_path: str | Path | None = None) -> QualityGateGateway:
         """从 YAML 配置创建网关（与 Phase 2 配置兼容）。"""
-        # 相对路径相对于项目根目录（app/ 的父目录）解析，不依赖 cwd
+        # 相对路径先尝试 cwd，再尝试包根目录
         if config_path is not None:
             cp = Path(config_path)
             if not cp.is_absolute():
-                cp = _PKG_ROOT / cp
+                if not cp.exists():
+                    cp = _PKG_ROOT / cp
             config_path = cp
         engine = QualityGateEngine.from_yaml(config_path)
         return cls(engine)
 
     @classmethod
-    def memory(cls) -> "QualityGateGateway":
-        """快速创建内存模式网关（无基础设施依赖）。"""
-        engine = QualityGateEngine(repository=None)  # defaults to MemoryRepository
+    def memory(cls) -> QualityGateGateway:
+        """快速创建内存模式网关（无基础设施依赖，但加载默认阈值配置）。"""
+        from agent_prod.gates.engine import load_config
+        config = load_config()  # loads default config.yaml with per-agent thresholds
+        engine = QualityGateEngine(config=config, repository=None)
         return cls(engine)
 
     @property
@@ -190,11 +225,24 @@ class QualityGateGateway:
             all_passed = result.status == ImprovementStatus.PRODUCTION
             return result, all_passed
 
-        except Exception as e:
+        except (asyncio.TimeoutError, OSError) as e:
+            # Transient errors — don't block traffic, but don't promote either
+            logger.warning("Gate pipeline transient error for session %s: %s", session_id, e)
+            improvement.status = ImprovementStatus.REJECTED
+            improvement.fail_gate = "pipeline"
+            improvement.fail_reason = f"Gate pipeline transient error: {e}"
+            return improvement, False
+        except Exception:
             logger.exception("Quality gate pipeline failed for session %s", session_id)
-            # 引擎故障时放行（不让门禁阻断服务）
-            improvement.status = ImprovementStatus.PRODUCTION
-            return improvement, True
+            # Check fail_open config — default False (safe)
+            fail_open = self._engine.config.get("gateway", {}).get("fail_open_on_error", False)
+            if fail_open:
+                improvement.status = ImprovementStatus.PRODUCTION
+                return improvement, True
+            improvement.status = ImprovementStatus.REJECTED
+            improvement.fail_gate = "pipeline"
+            improvement.fail_reason = "Internal error during gate evaluation — REJECTED"
+            return improvement, False
 
     def gate_results_to_dict(
         self,
@@ -203,12 +251,20 @@ class QualityGateGateway:
         """将门禁结果序列化为 API 响应格式。"""
         gates = []
         for gr in improvement.gate_results:
-            gates.append({
+            gate_entry = {
                 "gate": gr.gate_name.value if hasattr(gr.gate_name, 'value') else str(gr.gate_name),
                 "passed": gr.passed,
                 "reason": gr.reason[:200],
                 "duration_ms": round(gr.duration_ms, 1),
-            })
+            }
+            # 透传门禁详细数据（跳过内部 key）
+            if gr.details:
+                skip_keys = {"_internal"}
+                filtered = {k: v for k, v in gr.details.items()
+                           if not k.startswith("_") and k not in skip_keys}
+                if filtered:
+                    gate_entry["details"] = filtered
+            gates.append(gate_entry)
 
         fail_gate = improvement.fail_gate
         if fail_gate:
@@ -223,3 +279,92 @@ class QualityGateGateway:
             "failed_at": fail_gate_str,
             "fail_reason": improvement.fail_reason[:200] if improvement.fail_reason else None,
         }
+
+    # ── AgentTrace 接入 ──────────────────────────────────────
+
+    async def evaluate_agent_trace(
+        self,
+        trace,  # AgentTrace
+    ) -> tuple[Improvement, bool, float]:
+        """
+        对外部 agent trace 执行 5 道门验证。
+
+        流程：
+          1. 根据 trace.agent 查找 adapter
+          2. adapter 将 AgentTrace → Improvement
+          3. 投入门禁 pipeline
+          4. 返回 (improvement, all_passed, duration_ms)
+
+        参数:
+            trace: AgentTrace 实例
+        返回:
+            (improvement, all_passed, duration_ms)
+        """
+        import time as _time
+        _start = _time.monotonic()
+
+        from agent_prod.trace.adapters import ADAPTER_REGISTRY
+
+        # 查找 adapter
+        adapter = ADAPTER_REGISTRY.get(trace.agent)
+
+        # 转换
+        improvement = adapter.to_improvement(trace)
+        if improvement is None:
+            # 无法评估 — 返回一个标记为 rejected 的 Improvement
+            from agent_prod.gates.models import GateName
+            improvement = Improvement(
+                id=f"imp-{trace.session_id}",
+                name=trace.session_id,
+                status=ImprovementStatus.REJECTED,
+                fail_gate=GateName.GATE1.value,
+                fail_reason=f"Cannot evaluate: adapter for '{trace.agent}' returned None",
+                metadata={"agent": trace.agent, "error": "incomplete_trace"},
+            )
+            duration_ms = (_time.monotonic() - _start) * 1000
+            return improvement, False, duration_ms
+
+        # ── 注入 agent 类型和 decisions 到 metadata 供 Gate0 使用 ──
+        improvement.metadata["agent"] = trace.agent
+        improvement.metadata["decisions"] = _serialize_decisions(trace.decisions)
+        improvement.metadata["declared_tools"] = getattr(trace, "declared_tools", [])
+        improvement.metadata["auth_grant_id"] = getattr(trace, "auth_grant_id", "")
+
+        try:
+            result: Improvement = await asyncio.to_thread(
+                self._engine.run_pipeline,
+                improvement,
+                human_approver=trace.human_approver or "external-agent",
+                persist=False,
+            )
+
+            save_fn = self._engine.repository.save
+            if asyncio.iscoroutinefunction(save_fn):
+                await save_fn(result)
+            else:
+                save_fn(result)
+
+            all_passed = result.status == ImprovementStatus.PRODUCTION
+            duration_ms = (_time.monotonic() - _start) * 1000
+            return result, all_passed, duration_ms
+
+        except asyncio.CancelledError:
+            raise
+        except OSError as e:
+            # 磁盘/网络/文件系统错误 — 可能 transient，记录并拒绝本次评估
+            logger.warning("Pipeline I/O error for %s/%s: %s",
+                           trace.agent, trace.session_id, e)
+            improvement.status = ImprovementStatus.REJECTED
+            improvement.fail_gate = "pipeline"
+            improvement.fail_reason = f"I/O error during evaluation: {e}"
+            duration_ms = (_time.monotonic() - _start) * 1000
+            return improvement, False, duration_ms
+        except Exception:
+            # 未知内部错误 — 安全起见于 REJECT，不强制 PRODUCTION
+            logger.exception("Agent trace evaluation failed for %s/%s",
+                             trace.agent, trace.session_id)
+            improvement.status = ImprovementStatus.REJECTED
+            improvement.fail_gate = "pipeline"
+            improvement.fail_reason = "Internal error during gate evaluation — REJECTED for safety"
+            duration_ms = (_time.monotonic() - _start) * 1000
+            return improvement, False, duration_ms

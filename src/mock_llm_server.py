@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Mock OpenAI-compatible server for testing."""
-import http.server, json, time, socket, sys
+import http.server
+import json
+import time
+
 
 class Handler(http.server.BaseHTTPRequestHandler):
     def do_POST(self):

@@ -11,10 +11,10 @@ Zero external dependencies (no statsmodels/scipy). All statistics from scratch:
 from __future__ import annotations
 
 import math
-from typing import Any, Optional
+from datetime import UTC
+from typing import Any
 
 from pydantic import BaseModel, Field
-
 
 # ═══════════════════════════════════════════════════════════════════
 # Statistical utilities
@@ -172,7 +172,7 @@ def _betai(a: float, b: float, x: float) -> float:
     log_beta = _lgamma(a) + _lgamma(b) - _lgamma(a + b)
 
     # Continued fraction (Lentz's method)
-    fpmax = 1e300
+    _fpmax = 1e300
     tiny = 1e-30
     c = 1.0
     d = 1.0 - (a + b) * x / (a + 1.0)
@@ -519,7 +519,7 @@ class AttributionReport(BaseModel):
         return self.model_dump()
 
 
-def _get_log_attr(log: Any, attr_name: str) -> Optional[float]:
+def _get_log_attr(log: Any, attr_name: str) -> float | None:
     """Extract a numeric attribute from an ExecutionLogRecord, checking
     field, costs dict, and gate_passed.
     """
@@ -716,9 +716,9 @@ class CausalAttributor:
         else:
             summary = (f"Causal attribution complete: {detected}/{len(attributions)} "
                        f"hypotheses show causal signals.")
-        from datetime import datetime, timezone
+        from datetime import datetime
         return AttributionReport(
             attributions=attributions,
             summary=summary,
-            created_at=datetime.now(timezone.utc).isoformat(),
+            created_at=datetime.now(UTC).isoformat(),
         )

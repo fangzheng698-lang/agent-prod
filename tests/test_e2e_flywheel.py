@@ -91,81 +91,90 @@ print(f"    Tokens:     μ={baseline['avg_tokens']:.1f} σ={baseline['token_std'
 print(f"    Duration:   μ={baseline['avg_duration_ms']:.0f}ms σ={baseline['duration_std']:.0f}ms P95={baseline['duration_p95']:.0f}ms")
 print(f"    Gate pass:  {baseline['gate_pass_rate']:.0%}")
 
-# ═══════════════════════════════════════════
-print("\n" + "=" * 60)
-print("  Phase 2: Adaptive Gates — Dynamic Thresholds")
-print("=" * 60)
+if baseline["sample_count"] == 0:
+    print("\n" + "=" * 60)
+    print("  Phases 2-3: SKIPPED — no execution data (server not running?)")
+    print("=" * 60)
+    print("  Run 'agent-prod serve' in another terminal, then re-run this test.")
+    if __name__ == "__main__":
+        sys.exit(0)
+else:
 
-mge = MultiGateAdaptiveEngine()
-mge.add_gate("execution", ["duration_ms", "tokens"], window_size=20, sigma_mult=2.0, min_samples=3)
-mge.add_gate("regression", ["duration_ms"], window_size=20, sigma_mult=2.0, min_samples=3)
-mge.add_gate("gray_release", ["duration_ms", "tokens"], window_size=20, sigma_mult=3.0, min_samples=3)
+    # ═══════════════════════════════════════════
+    print("\n" + "=" * 60)
+    print("  Phase 2: Adaptive Gates — Dynamic Thresholds")
+    print("=" * 60)
 
-# Feed real data
-for r in results:
-    mge.record("execution", {"duration_ms": r["duration_ms"], "tokens": r["tokens"]})
-    mge.record("regression", {"duration_ms": r["duration_ms"]})
-    mge.record("gray_release", {"duration_ms": r["duration_ms"], "tokens": r["tokens"]})
+    mge = MultiGateAdaptiveEngine()
+    mge.add_gate("execution", ["duration_ms", "tokens"], window_size=20, sigma_mult=2.0, min_samples=3)
+    mge.add_gate("regression", ["duration_ms"], window_size=20, sigma_mult=2.0, min_samples=3)
+    mge.add_gate("gray_release", ["duration_ms", "tokens"], window_size=20, sigma_mult=3.0, min_samples=3)
 
-mge.calibrate_all()
+    # Feed real data
+    for r in results:
+        mge.record("execution", {"duration_ms": r["duration_ms"], "tokens": r["tokens"]})
+        mge.record("regression", {"duration_ms": r["duration_ms"]})
+        mge.record("gray_release", {"duration_ms": r["duration_ms"], "tokens": r["tokens"]})
 
-# Test: evaluate a new "normal" execution
-test_normal = {
-    "execution": {"duration_ms": baseline["avg_duration_ms"], "tokens": baseline["avg_tokens"]},
-    "regression": {"duration_ms": baseline["avg_duration_ms"]},
-    "gray_release": {"duration_ms": baseline["avg_duration_ms"], "tokens": baseline["avg_tokens"]},
-}
-result_normal = mge.evaluate_all(test_normal)
-print(f"  Normal execution: {'PASS' if result_normal['all_passed'] else 'FAIL'}")
+    mge.calibrate_all()
 
-# Test: outlier
-test_outlier = {
-    "execution": {"duration_ms": baseline["avg_duration_ms"] * 3, "tokens": baseline["avg_tokens"] * 5},
-    "regression": {"duration_ms": baseline["avg_duration_ms"] * 3},
-    "gray_release": {"duration_ms": baseline["avg_duration_ms"] * 3, "tokens": baseline["avg_tokens"] * 5},
-}
-result_outlier = mge.evaluate_all(test_outlier)
-print(f"  Outlier execution: {'PASS' if result_outlier['all_passed'] else 'FAIL'} (expected FAIL)")
-if result_outlier["failed_gates"]:
-    print(f"    Failed gates: {result_outlier['failed_gates']}")
-
-# Show thresholds
-for gname, eng in mge._gates.items():
-    th = eng.get_thresholds()
-    for mname, t in th.items():
-        print(f"  [{gname}] {mname}: μ={t.ewma_mean:.1f} σ={t.ewma_std:.1f} band=[{t.adaptive_lower:.1f}, {t.adaptive_upper:.1f}]")
-
-# ═══════════════════════════════════════════
-print("\n" + "=" * 60)
-print("  Phase 3: Integrated — Flywheel × Adaptive Gates")
-print("=" * 60)
-
-# Use flywheel baseline to feed adaptive gates thresholds
-flywheel_baseline = baseline
-old_fixed = {"execution_time_tolerance": 1.2, "token_tolerance": 1.1, "regress_pct": 0.95}
-new_adaptive = {
-    "execution": {
-        "duration_ms_upper": flywheel_baseline["avg_duration_ms"] + 2 * flywheel_baseline["duration_std"],
-        "tokens_upper": flywheel_baseline["avg_tokens"] + 2 * flywheel_baseline["token_std"],
+    # Test: evaluate a new "normal" execution
+    test_normal = {
+        "execution": {"duration_ms": baseline["avg_duration_ms"], "tokens": baseline["avg_tokens"]},
+        "regression": {"duration_ms": baseline["avg_duration_ms"]},
+        "gray_release": {"duration_ms": baseline["avg_duration_ms"], "tokens": baseline["avg_tokens"]},
     }
-}
+    result_normal = mge.evaluate_all(test_normal)
+    print(f"  Normal execution: {'PASS' if result_normal['all_passed'] else 'FAIL'}")
 
-print(f"  OLD (fixed): gate1.execution_time_tolerance={old_fixed['execution_time_tolerance']}")
-print(f"               gate1.token_tolerance={old_fixed['token_tolerance']}")
-print(f"               gate3.regress_pct={old_fixed['regress_pct']}")
-print(f"  NEW (data-driven from {flywheel_baseline['sample_count']} real executions):")
-print(f"    duration_ms ≤ {new_adaptive['execution']['duration_ms_upper']:.0f}ms  (μ+2σ)")
-print(f"    tokens      ≤ {new_adaptive['execution']['tokens_upper']:.0f}        (μ+2σ)")
-print(f"  Improvement: from blind fixed threshold → evidence-based dynamic bound")
+    # Test: outlier
+    test_outlier = {
+        "execution": {"duration_ms": baseline["avg_duration_ms"] * 3, "tokens": baseline["avg_tokens"] * 5},
+        "regression": {"duration_ms": baseline["avg_duration_ms"] * 3},
+        "gray_release": {"duration_ms": baseline["avg_duration_ms"] * 3, "tokens": baseline["avg_tokens"] * 5},
+    }
+    result_outlier = mge.evaluate_all(test_outlier)
+    print(f"  Outlier execution: {'PASS' if result_outlier['all_passed'] else 'FAIL'} (expected FAIL)")
+    if result_outlier["failed_gates"]:
+        print(f"    Failed gates: {result_outlier['failed_gates']}")
 
-# ═══════════════════════════════════════════
-print("\n" + "=" * 60)
-print("  VERDICT")
-print("=" * 60)
-print(f"  ✅ Data collection:    {len(results)}/{len(prompts)} successful")
-print(f"  ✅ Statistical baseline: {flywheel_baseline['sample_count']} samples")
-print(f"  ✅ Adaptive gates:      {len(mge._gates)} gates with dynamic thresholds")
-print(f"  ✅ Normal pass:         {'PASS' if result_normal['all_passed'] else 'FAIL'}")
-print(f"  ✅ Outlier caught:      {'YES' if not result_outlier['all_passed'] else 'NO — FALSE NEGATIVE'}")
-print(f"  ✅ Fixed→Adaptive:      thresholds now derived from real execution data, not constants")
-print(f"  🏆 FLYWHEEL SPINNING — Data drives gates, gates drive quality, quality feeds data")
+    # Show thresholds
+    for gname, eng in mge._gates.items():
+        th = eng.get_thresholds()
+        for mname, t in th.items():
+            print(f"  [{gname}] {mname}: μ={t.ewma_mean:.1f} σ={t.ewma_std:.1f} band=[{t.adaptive_lower:.1f}, {t.adaptive_upper:.1f}]")
+
+    # ═══════════════════════════════════════════
+    print("\n" + "=" * 60)
+    print("  Phase 3: Integrated — Flywheel × Adaptive Gates")
+    print("=" * 60)
+
+    # Use flywheel baseline to feed adaptive gates thresholds
+    flywheel_baseline = baseline
+    old_fixed = {"execution_time_tolerance": 1.2, "token_tolerance": 1.1, "regress_pct": 0.95}
+    new_adaptive = {
+        "execution": {
+            "duration_ms_upper": flywheel_baseline["avg_duration_ms"] + 2 * flywheel_baseline["duration_std"],
+            "tokens_upper": flywheel_baseline["avg_tokens"] + 2 * flywheel_baseline["token_std"],
+        }
+    }
+
+    print(f"  OLD (fixed): gate1.execution_time_tolerance={old_fixed['execution_time_tolerance']}")
+    print(f"               gate1.token_tolerance={old_fixed['token_tolerance']}")
+    print(f"               gate3.regress_pct={old_fixed['regress_pct']}")
+    print(f"  NEW (data-driven from {flywheel_baseline['sample_count']} real executions):")
+    print(f"    duration_ms ≤ {new_adaptive['execution']['duration_ms_upper']:.0f}ms  (μ+2σ)")
+    print(f"    tokens      ≤ {new_adaptive['execution']['tokens_upper']:.0f}        (μ+2σ)")
+    print(f"  Improvement: from blind fixed threshold → evidence-based dynamic bound")
+
+    # ═══════════════════════════════════════════
+    print("\n" + "=" * 60)
+    print("  VERDICT")
+    print("=" * 60)
+    print(f"  ✅ Data collection:    {len(results)}/{len(prompts)} successful")
+    print(f"  ✅ Statistical baseline: {flywheel_baseline['sample_count']} samples")
+    print(f"  ✅ Adaptive gates:      {len(mge._gates)} gates with dynamic thresholds")
+    print(f"  ✅ Normal pass:         {'PASS' if result_normal['all_passed'] else 'FAIL'}")
+    print(f"  ✅ Outlier caught:      {'YES' if not result_outlier['all_passed'] else 'NO — FALSE NEGATIVE'}")
+    print(f"  ✅ Fixed→Adaptive:      thresholds now derived from real execution data, not constants")
+    print(f"  🏆 FLYWHEEL SPINNING — Data drives gates, gates drive quality, quality feeds data")

@@ -13,14 +13,13 @@ FastAPI SSE endpoint: GET /v1/chat/stream，每轮实时推送。
 from __future__ import annotations
 
 import json
-import time
 import uuid
-from typing import AsyncGenerator
+from collections.abc import AsyncGenerator
 
-from agent_prod.agent.llm import LLMClient
-from agent_prod.agent.tools import ToolRegistry
-from agent_prod.agent.runtime import AgentRuntime, TurnRecord
 from agent_prod.agent.budget import BudgetController
+from agent_prod.agent.llm import LLMClient
+from agent_prod.agent.runtime import AgentRuntime
+from agent_prod.agent.tools import ToolRegistry
 
 
 async def stream_response(

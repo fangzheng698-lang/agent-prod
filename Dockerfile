@@ -1,17 +1,27 @@
-FROM python:3.11-slim
+# Dockerfile for agent-prod
+# Multi-stage build: produces a small production image
+# Build: docker build -t agent-prod .
+# Run:   docker run -p 8000:8000 -e QUALITY_GATES_MODE=memory agent-prod
+
+FROM python:3.11-slim-bookworm
+
+RUN useradd --create-home --shell /bin/bash agent-prod \
+    && mkdir -p /app/data \
+    && chown agent-prod:agent-prod /app/data
 
 WORKDIR /app
+COPY pyproject.toml README.md ./
+COPY src/ src/
 
-# 依赖先装（利用 Docker 缓存）
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Non-editable install: package goes into site-packages
+RUN pip install --no-cache-dir .
 
-# 源码
-COPY . .
+ENV QUALITY_GATES_MODE=memory
+ENV QUALITY_GATES_ENABLED=true
 
-# 数据目录（SQLite 文件放这里）
-RUN mkdir -p /app/data
-
+USER agent-prod
 EXPOSE 8000
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+    CMD python3 -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["agent-prod", "serve", "--host", "0.0.0.0"]

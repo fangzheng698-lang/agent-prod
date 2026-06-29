@@ -14,9 +14,8 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
-from typing import Optional
 
 from pydantic import BaseModel, Field
 
@@ -46,7 +45,7 @@ class StatusTransition(BaseModel):
     from_status: ReleaseStatus
     to_status: ReleaseStatus
     timestamp: str = Field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+        default_factory=lambda: datetime.now(UTC).isoformat()
     )
     reason: str = ""
 
@@ -58,10 +57,10 @@ class ReleaseState(BaseModel):
     improvement_id: str = ""
     notes: str = ""
     created_at: str = Field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+        default_factory=lambda: datetime.now(UTC).isoformat()
     )
     updated_at: str = Field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+        default_factory=lambda: datetime.now(UTC).isoformat()
     )
     history: list[StatusTransition] = Field(default_factory=list)
 
@@ -101,7 +100,7 @@ class ReleaseManager:
         if version in self._releases:
             raise ValueError(f"Version '{version}' already exists")
 
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         state = ReleaseState(
             version=version,
             status=ReleaseStatus.CANDIDATE,
@@ -119,11 +118,11 @@ class ReleaseManager:
         self._releases[version] = state
         return state
 
-    def status(self, version: str) -> Optional[ReleaseState]:
+    def status(self, version: str) -> ReleaseState | None:
         """查询版本发布状态。"""
         return self._releases.get(version)
 
-    def get_production(self) -> Optional[ReleaseState]:
+    def get_production(self) -> ReleaseState | None:
         """获取当前 production 版本（最近到达 production 的版本）。"""
         prod_releases = [
             r for r in self._releases.values()
@@ -136,7 +135,7 @@ class ReleaseManager:
 
     def list_releases(
         self,
-        status: Optional[ReleaseStatus] = None,
+        status: ReleaseStatus | None = None,
     ) -> list[ReleaseState]:
         """列出所有发布，可按状态过滤。"""
         results = list(self._releases.values())
@@ -222,7 +221,7 @@ class ReleaseManager:
         if from_status == to_status and state.history:
             return state
 
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         state.status = to_status
         state.updated_at = now
         state.history.append(StatusTransition(

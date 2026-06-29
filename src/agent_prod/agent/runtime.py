@@ -7,12 +7,12 @@ from __future__ import annotations
 
 import json
 import time
-from dataclasses import dataclass, field
-from typing import Any, Callable, AsyncGenerator
+from collections.abc import AsyncGenerator, Callable
+from typing import Any
 
-from agent_prod.agent.llm import LLMClient, LLMResponse, ToolCall
-from agent_prod.agent.tools import ToolRegistry
 from agent_prod.agent.budget import BudgetController, BudgetExceeded
+from agent_prod.agent.llm import LLMClient, LLMResponse
+from agent_prod.agent.tools import ToolRegistry
 
 
 class TurnRecord:
@@ -58,7 +58,7 @@ class AgentRuntime:
         max_turns: int = 50,
         max_tokens: int = 100_000,
         system_prompt: str | None = None,
-        budget: "BudgetController | None" = None,
+        budget: BudgetController | None = None,
         on_turn: Callable[[TurnRecord], Any] | None = None,
         on_error: Callable[[Exception, int], Any] | None = None,
     ):
@@ -81,7 +81,7 @@ class AgentRuntime:
     ) -> tuple[list[dict], list[TurnRecord]]:
         """非流式执行。返回 (最终消息列表, 每轮记录)。"""
         msgs = list(messages)
-        self._turns: list[TurnRecord] = []
+        self._turns = []
         tools_schema = self._tools.list_schemas()
 
         for turn_idx in range(self._max_turns):
@@ -112,7 +112,7 @@ class AgentRuntime:
                 break
 
             # ── 追加 assistant 消息 ──
-            assistant_msg = {"role": "assistant", "content": resp.content or ""}
+            assistant_msg: dict[str, object] = {"role": "assistant", "content": resp.content or ""}
             if resp.tool_calls:
                 assistant_msg["tool_calls"] = [
                     {

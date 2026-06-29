@@ -15,8 +15,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Any, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 # 延迟导入避免循环依赖
 ReleaseManager = None  # type: ignore
@@ -28,15 +28,17 @@ def _get_release_manager():
     if ReleaseManager is None:
         from agent_prod.testing.release_manager import (
             ReleaseManager as RM,
-            ReleaseStatus,
+        )
+        from agent_prod.testing.release_manager import (
             ReleaseState,
+            ReleaseStatus,
             StatusTransition,
         )
         ReleaseManager = RM
         return RM, ReleaseStatus, ReleaseState, StatusTransition
     from agent_prod.testing.release_manager import (
-        ReleaseStatus,
         ReleaseState,
+        ReleaseStatus,
         StatusTransition,
     )
     return ReleaseManager, ReleaseStatus, ReleaseState, StatusTransition
@@ -49,7 +51,7 @@ class RollbackRecord:
     from_status: str
     to_status: str = "rolled_back"
     timestamp: str = field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+        default_factory=lambda: datetime.now(UTC).isoformat()
     )
     reason: str = ""
 
