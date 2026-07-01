@@ -43,6 +43,13 @@ QCLAW_SESSIONS_DIR = Path.home() / ".qclaw" / "agents" / "main" / "sessions"
 DEFAULT_AGENT_PROD_URL = "http://localhost:8000"
 
 
+def _env_flag(name: str, default: bool = False) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
 class QClawWatchdog:
     """Polling-based watcher for qclaw session files.
 
@@ -57,12 +64,20 @@ class QClawWatchdog:
         api_key: str | None = None,
         poll_interval: float = 5.0,
         agent_type: str = "qclaw",
+        auto_approve_missing_human_approver: bool | None = None,
+        auto_approver: str = "qclaw-auto",
     ):
         self.sessions_dir = sessions_dir
         self.agent_prod_url = agent_prod_url.rstrip("/")
         self.api_key = api_key
         self.poll_interval = poll_interval
         self.agent_type = agent_type
+        self.auto_approve_missing_human_approver = (
+            _env_flag("AGENT_PROD_QCLAW_AUTO_APPROVE")
+            if auto_approve_missing_human_approver is None
+            else auto_approve_missing_human_approver
+        )
+        self.auto_approver = auto_approver
         self._known: set[str] = set()
         self._running = False
         self._submitted_count = 0
@@ -140,6 +155,12 @@ class QClawWatchdog:
                 logger.warning("Failed to parse qclaw session: %s", fpath.name)
                 self._error_count += 1
                 return
+
+            if (
+                self.auto_approve_missing_human_approver
+                and not trace_data.get("human_approver")
+            ):
+                trace_data["human_approver"] = self.auto_approver
 
             result = self._submit_evaluate(trace_data)
 
@@ -379,6 +400,20 @@ def main():
         default="qclaw",
         help="Agent type identifier for gate thresholds",
     )
+    parser.add_argument(
+        "--auto-approve-missing-human-approver",
+        action="store_true",
+        default=_env_flag("AGENT_PROD_QCLAW_AUTO_APPROVE"),
+        help=(
+            "Fill missing human_approver with --auto-approver. Intended for local "
+            "developer sessions; disabled by default."
+        ),
+    )
+    parser.add_argument(
+        "--auto-approver",
+        default=os.environ.get("AGENT_PROD_QCLAW_AUTO_APPROVER", "qclaw-auto"),
+        help="Approver label used when auto approval is enabled",
+    )
 
     args = parser.parse_args()
 
@@ -388,6 +423,8 @@ def main():
         api_key=args.api_key or None,
         poll_interval=args.interval,
         agent_type=args.agent_type,
+        auto_approve_missing_human_approver=args.auto_approve_missing_human_approver,
+        auto_approver=args.auto_approver,
     )
 
     signal.signal(signal.SIGTERM, lambda sig, frame: watchdog.stop())

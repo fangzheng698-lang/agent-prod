@@ -11,7 +11,7 @@ AttributionEngine 对比 baseline 和 candidate 的 decisions/tool_calls，
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field as _dc_field
 from typing import Any
 
 
@@ -27,7 +27,7 @@ class ToolCallDiff:
     baseline_duration_ms: float = 0.0
     candidate_duration_ms: float = 0.0
     delta_duration_ms: float = 0.0
-    arg_diffs: list[str] = field(default_factory=list)
+    arg_diffs: list[str] = _dc_field(default_factory=list)
     contribution_pct: float = 0.0  # 对该决策的贡献百分比
 
 
@@ -40,7 +40,7 @@ class DecisionDiff:
     candidate_prompt_tokens: int = 0
     baseline_completion_tokens: int = 0
     candidate_completion_tokens: int = 0
-    tool_call_diffs: list[ToolCallDiff] = field(default_factory=list)
+    tool_call_diffs: list[ToolCallDiff] = _dc_field(default_factory=list)
     tool_calls_added: int = 0
     tool_calls_removed: int = 0
     contribution_pct: float = 0.0
@@ -59,7 +59,7 @@ class AttributionReport:
     delta_pct: float = 0.0
 
     # decision 级
-    decision_diffs: list[DecisionDiff] = field(default_factory=list)
+    decision_diffs: list[DecisionDiff] = _dc_field(default_factory=list)
     decisions_added: int = 0
     decisions_removed: int = 0
 
@@ -110,19 +110,21 @@ class AttributionEngine:
         )
 
         # 1) decision 级对比
-        baseline_ids = {d.get("decision_id", f"b{i}"): d for i, d in enumerate(baseline_decisions)}
-        candidate_ids = {d.get("decision_id", f"c{i}"): d for i, d in enumerate(candidate_decisions)}
+        b_ids = {d.get("decision_id", f"b{i}"): d for i, d in enumerate(baseline_decisions)}
+        c_ids = {d.get("decision_id", f"c{i}"): d for i, d in enumerate(candidate_decisions)}
 
-        all_ids = set(baseline_ids.keys()) | set(candidate_ids.keys())
+        b_key_set = set(b_ids.keys())
+        c_key_set = set(c_ids.keys())
+        all_ids = b_key_set | c_key_set
 
         # 新增/删除
-        report.decisions_added = len(candidate_ids - baseline_ids)
-        report.decisions_removed = len(baseline_ids - candidate_ids)
+        report.decisions_added = len(c_key_set - b_key_set)
+        report.decisions_removed = len(b_key_set - c_key_set)
 
         total_delta = 0.0
         for did in all_ids:
-            bd = baseline_ids.get(did)
-            cd = candidate_ids.get(did)
+            bd = b_ids.get(did)
+            cd = c_ids.get(did)
             dd = _compare_decisions(did, bd, cd)
             report.decision_diffs.append(dd)
             total_delta += abs(dd.contribution_pct)
