@@ -82,9 +82,10 @@ class TestEvaluateEndpoint:
         assert len(data["gates"]) > 0
         assert data["total_duration_ms"] > 0
 
-        # All 7 gate results should be present
+        # All Gate0-Gate7 results should be present
         gate_names = {g["gate"] for g in data["gates"]}
         assert "gate0_permission" in gate_names
+        assert "gate7_execution_consistency" in gate_names
         assert "gate1_execution" in gate_names
         assert "gate2_trace_integrity" in gate_names
         assert "gate3_regression" in gate_names
@@ -101,7 +102,7 @@ class TestEvaluateEndpoint:
         assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
         data = resp.json()
         assert data["session_id"] == "ses_minimal"
-        assert len(data["gates"]) == 7
+        assert len(data["gates"]) == 8
 
     def test_evaluate_missing_session_id(self):
         """Missing session_id: auto-generated, not an error."""

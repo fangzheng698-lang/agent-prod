@@ -243,11 +243,13 @@ async def ready():
     """
     checks = {}
 
-    # 1. LLM client
+    # 1. LLM client. Gate6 can run in checklist/degraded mode without a
+    # configured external evaluator, so lack of an API key should not keep the
+    # service out of readiness.
     if llm:
         checks["llm"] = "ok"
     else:
-        checks["llm"] = "not_ready"
+        checks["llm"] = "degraded (not configured)"
 
     # 2. Tools
     if tools:
@@ -276,7 +278,8 @@ async def ready():
         checks["quality_gates"] = "degraded"
 
     all_ok = all(
-        v.startswith("ok") for v in checks.values()
+        v.startswith("ok") or v.startswith("degraded")
+        for v in checks.values()
     )
 
     status_code = 200 if all_ok else 503

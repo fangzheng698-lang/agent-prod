@@ -1,10 +1,10 @@
 # agent-prod — Enterprise AI Agent Quality Gate Infrastructure
 
-**生产级 AI Agent 质量门禁系统。** 任何 agent（Hermes、Claude Code、自研）都可以通过一行代码接入，经过 7 道质量门评估，决定是否发布到生产环境。
+**生产级 AI Agent 质量门禁系统。** 任何 agent（Hermes、Claude Code、自研）都可以通过一行代码接入，经过 Gate0-Gate7 质量门评估，决定是否发布到生产环境。
 
 ```
 agent_prod/
-├── gates/          7 道质量门 (Gate0-Gate6)
+├── gates/          质量门 (Gate0-Gate7)
 ├── server/         FastAPI REST API 服务
 ├── gateway/        评估管道编排
 ├── integration/    qclaw 等外部 agent 集成
@@ -138,7 +138,7 @@ tools:
       my_read_file: read_file    # 映射为安全操作
 ```
 
-## 7 道质量门
+## Gate0-Gate7 质量门
 
 | Gate | 名称 | 作用 |
 |---|---|---|
@@ -149,6 +149,7 @@ tools:
 | Gate4 | 灰度发布 | 流量逐步放量 |
 | Gate5 | 审计 | 发布合规审计 |
 | Gate6 | 答案质量 | LLM 评估答案质量（12 项检查清单） |
+| Gate7 | 执行一致性 | 校验执行计划、输出与目标是否一致 |
 
 ## 安装
 

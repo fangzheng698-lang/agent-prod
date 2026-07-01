@@ -411,35 +411,39 @@ def _generate_default_config() -> dict:
 
 def cmd_configure(args: argparse.Namespace) -> None:  # noqa: F821
     """CLI entry point for 'agent-prod configure'."""
+    gate7_mode = getattr(args, "gate7_mode", None)
+    mode = getattr(args, "mode", None)
+    agent = getattr(args, "agent", None)
+
     # ── Quick mode: agent-prod configure --gate7-mode enforce --agent my-agent ──
-    if args.gate7_mode and args.agent:
+    if gate7_mode and agent:
         config = load_config() if CONFIG_PATH.exists() else _generate_default_config()
         gate7 = config.setdefault("gates", {}).setdefault("gate7", {})
         per_agent = gate7.setdefault("per_agent", {})
-        if args.agent == "__global__":
-            gate7["mode"] = args.gate7_mode
-            print(f"Gate7 global mode set to '{args.gate7_mode}'.")
+        if agent == "__global__":
+            gate7["mode"] = gate7_mode
+            print(f"Gate7 global mode set to '{gate7_mode}'.")
         else:
-            per_agent[args.agent] = {"mode": args.gate7_mode}
-            print(f"Gate7 mode for '{args.agent}' set to '{args.gate7_mode}'.")
+            per_agent[agent] = {"mode": gate7_mode}
+            print(f"Gate7 mode for '{agent}' set to '{gate7_mode}'.")
         save_config(config)
         print("Restart the server to apply: agent-prod serve")
         return
-    if args.gate7_mode and not args.agent:
+    if gate7_mode and not agent:
         print("Error: --gate7-mode requires --agent <name> or use '__global__' for default")
         sys.exit(1)
 
     # ── Quick mode: agent-prod configure --mode observe --agent my-agent ──
-    if args.mode and args.agent:
+    if mode and agent:
         config = load_config() if CONFIG_PATH.exists() else _generate_default_config()
         gate0 = config.setdefault("gates", {}).setdefault("gate0", {})
         per_agent = gate0.setdefault("per_agent", {})
-        per_agent[args.agent] = {"mode": args.mode}
+        per_agent[agent] = {"mode": mode}
         save_config(config)
-        print(f"Gate0 mode for '{args.agent}' set to '{args.mode}'.")
+        print(f"Gate0 mode for '{agent}' set to '{mode}'.")
         print("Restart the server to apply: agent-prod serve")
         return
-    if args.mode and not args.agent:
+    if mode and not agent:
         print("Error: --mode requires --agent <name>")
         sys.exit(1)
 

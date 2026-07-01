@@ -138,9 +138,8 @@ def _load_aliases(config: dict | None = None) -> dict[str, dict[str, str]]:
 def configure(config: dict | None = None) -> None:
     """用配置覆盖默认风险分类和别名。允许增量更新。"""
     global TOOL_RISK, _ALIASES
-    if config:
-        TOOL_RISK = _load_from_config(config)
-        _ALIASES = _load_aliases(config)
+    TOOL_RISK = _load_from_config(config)
+    _ALIASES = _load_aliases(config)
 
 
 def resolve_tool_name(tool_name: str, agent_type: str | None = None) -> str:

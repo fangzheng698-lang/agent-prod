@@ -34,8 +34,8 @@ tracing = ["opentelemetry-exporter-otlp-proto-grpc>=1.20"]
 unleash = ["UnleashClient>=5.0"]
 
 [project.urls]
-Homepage = "https://github.com/example/agent-prod"
-Documentation = "https://github.com/example/agent-prod"
+Homepage = "https://github.com/fangzheng698-lang/agent-prod"
+Documentation = "https://github.com/fangzheng698-lang/agent-prod"
 
 [project.scripts]
 agent-prod = "agent_prod.cli:main"

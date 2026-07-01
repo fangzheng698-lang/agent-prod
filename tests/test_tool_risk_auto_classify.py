@@ -12,6 +12,7 @@ from agent_prod.gates.tool_risk import (
     _parse_classifier_response,
     auto_classify_tool,
     clear_auto_classified_cache,
+    configure,
     get_risk,
 )
 
@@ -20,10 +21,12 @@ class TestAutoClassifyTool(unittest.TestCase):
     """Tests for auto_classify_tool() and surrounding utilities."""
 
     def setUp(self):
+        configure(None)
         clear_auto_classified_cache()
 
     def tearDown(self):
         clear_auto_classified_cache()
+        configure(None)
 
     # ── _parse_classifier_response ─────────────────────────
 
