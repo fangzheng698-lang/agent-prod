@@ -35,7 +35,7 @@ Quick start for any agent (one line of code):
         print(f"Rejected at {result['failed_at']}: {result['fail_reason']}")
 """
 
-__version__ = "0.5.0"
+__version__ = "1.0.0"
 
 # Public SDK
 from agent_prod.client import AgentProdClient, AgentProdError, to_agent_trace  # noqa: F401

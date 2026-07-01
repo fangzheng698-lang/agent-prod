@@ -2,6 +2,14 @@
 
 All notable changes to agent-prod will be documented in this file.
 
+## [1.0.0] - 2026-07-01
+
+### Added
+- Gate0-Gate7 production quality gate pipeline with readiness, attribution, qclaw watchdog controls, and CI coverage.
+
+### Changed
+- Promoted package, SDK, API metadata, and README version to 1.0.0.
+
 ## [0.3.0] - 2026-06-23
 
 ### Added

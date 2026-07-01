@@ -172,4 +172,4 @@ pip install "agent-prod[all]"
 
 ## 版本
 
-0.5.0
+1.0.0

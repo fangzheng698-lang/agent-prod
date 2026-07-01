@@ -141,8 +141,8 @@ def _start_watchdog_thread(port: int) -> None:
 
 app = FastAPI(
     title="agent-prod",
-    description="Enterprise Agent Quality Gate Platform — Gate0-6 pipeline with answer quality evaluation",
-    version="0.5.0",
+    description="Enterprise Agent Quality Gate Platform — Gate0-Gate7 pipeline with answer quality evaluation",
+    version="1.0.0",
 )
 
 

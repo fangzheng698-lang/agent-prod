@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-prod"
-version = "0.5.0"
+version = "1.0.0"
 description = "Enterprise-grade AI agent framework — plug-in quality gates, causal attribution, data flywheel, adaptive thresholds"
 readme = "README.md"
 license = {text = "MIT"}
