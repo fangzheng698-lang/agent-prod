@@ -177,3 +177,7 @@ pip install "agent-prod[all]"
 ## 开源许可
 
 本项目基于 MIT License 开源，详见 [LICENSE](LICENSE)。
+
+## 郑重声明
+
+本项目需要多轮持续运行形成基线，才会提升智能体质量！！！
