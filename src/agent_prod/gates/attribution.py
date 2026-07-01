@@ -11,7 +11,8 @@ AttributionEngine 对比 baseline 和 candidate 的 decisions/tool_calls，
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field as _dc_field
+from dataclasses import dataclass
+from dataclasses import field as _dc_field
 from typing import Any
 
 
@@ -341,7 +342,7 @@ def _build_root_cause(report: AttributionReport) -> tuple[str, str]:
 def _build_fix_prompt(report: AttributionReport) -> str:
     """生成可直接喂给 agent 的修复 prompt."""
     lines = [
-        f"## 回归根因分析\n",
+        "## 回归根因分析\n",
         f"触发指标: {report.field}",
         f"基线值: {report.baseline_value} → 候选值: {report.candidate_value} "
         f"(变化: {report.delta_pct:+.1f}%)\n",
@@ -350,7 +351,7 @@ def _build_fix_prompt(report: AttributionReport) -> str:
     ]
 
     # 附每个异常 decision 详情
-    for i, dd in enumerate(report.decision_diffs, 1):
+    for dd in report.decision_diffs:
         issues = []
         if dd.tool_calls_added:
             issues.append(f"+{dd.tool_calls_added} 个工具调用新增")

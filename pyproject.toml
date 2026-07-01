@@ -32,6 +32,9 @@ postgres = ["asyncpg>=0.28", "sqlalchemy[asyncio]>=2.0"]
 prometheus = ["prometheus-client>=0.19"]
 tracing = ["opentelemetry-exporter-otlp-proto-grpc>=1.20"]
 unleash = ["UnleashClient>=5.0"]
+dev = [
+    "pytest>=8.0",
+]
 
 [project.urls]
 Homepage = "https://github.com/fangzheng698-lang/agent-prod"
