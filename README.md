@@ -173,3 +173,7 @@ pip install "agent-prod[all]"
 ## 版本
 
 1.0.0
+
+## 开源许可
+
+本项目基于 MIT License 开源，详见 [LICENSE](LICENSE)。
