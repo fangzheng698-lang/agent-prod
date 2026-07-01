@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/fangzheng698-lang/agent-prod/security
+    about: Please report sensitive security issues privately.
