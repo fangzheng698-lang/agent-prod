@@ -1,6 +1,23 @@
-# agent-prod — Enterprise AI Agent Quality Gate Infrastructure
+# agent-prod — Production AI Agent Quality Gate & Risk Control Framework
 
-**生产级 AI Agent 质量门禁系统。** 任何 agent（Hermes、Claude Code、自研）都可以通过一行代码接入，经过 Gate0-Gate7 质量门评估，决定是否发布到生产环境。
+Production-grade LLMOps framework for **AI agent evaluation, quality gates,
+risk control, regression detection, gray release, audit, and observability**.
+It helps teams decide whether an AI agent run, version, or release is safe
+enough for production.
+
+**生产级 AI Agent 质量门禁与风控系统。** 任何 agent（Hermes、Claude Code、自研）都可以通过一行代码接入，经过 Gate0-Gate7 质量门评估，判断一次运行、一个版本或一次发布是否可以进入生产环境。
+
+## What Makes It Different
+
+agent-prod focuses on **production risk control for AI agents**, not only prompt
+testing or offline benchmarks. It combines permission checks, budget control,
+trace integrity, regression detection, gray release, audit, LLM answer quality,
+execution consistency, causal attribution, and operational observability in one
+release gate pipeline.
+
+Common search terms for this project: AI agent quality gate, AI agent risk
+control, LLMOps, agent evaluation, LLM evaluation, agent governance, regression
+detection, gray release, agent observability, production AI agents.
 
 ```
 agent_prod/
