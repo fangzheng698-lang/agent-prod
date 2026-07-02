@@ -1,3 +1,6 @@
+# Copyright (c) 2026 fang.zheng
+# License: MIT (see LICENSE file in root)
+
 """Hermes Session Watchdog — real-time quality gate injection.
 
 Monitors ~/.hermes/sessions/ for new or updated session files.

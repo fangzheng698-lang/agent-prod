@@ -90,6 +90,9 @@ def evaluate_trace(
 ) -> dict[str, Any]:
     """完整的 Gate0-Gate7 质量门评估。
 
+# Copyright (c) 2026 fang.zheng
+# License: MIT (see LICENSE file in root)
+
     传入 agent trace（工具调用、LLM 决策、性能指标），返回各道门的
     通过/失败结果。用于在发布前判断一次 agent 运行是否可以进入生产。
 

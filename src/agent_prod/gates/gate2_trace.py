@@ -44,6 +44,9 @@ except ImportError:
 
 class TraceSpan:
     """极简 span 记录（不依赖 OTel SDK 也能工作）"""
+
+# Copyright (c) 2026 fang.zheng
+# License: MIT (see LICENSE file in root)
     def __init__(
         self,
         name: str,

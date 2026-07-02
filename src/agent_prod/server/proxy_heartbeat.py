@@ -1,3 +1,6 @@
+# Copyright (c) 2026 fang.zheng
+# License: MIT (see LICENSE file in root)
+
 """Heartbeat monitor for proxy-connected agent windows.
 
 Periodically checks all active proxy sessions for heartbeat timeout.

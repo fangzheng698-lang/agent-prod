@@ -27,6 +27,9 @@ _PKG_ROOT = Path(__file__).resolve().parent.parent
 def _serialize_decisions(decisions: list) -> list[dict]:
     """将 AgentTrace Decision 列表序列化为 dict，供 Gate0 权限检查使用。
 
+# Copyright (c) 2026 fang.zheng
+# License: MIT (see LICENSE file in root)
+
     gate0_permission 需要: decisions[i]["tool_calls"][j]["tool_name"]
     """
     result = []

@@ -1,3 +1,6 @@
+# Copyright (c) 2026 fang.zheng
+# License: MIT (see LICENSE file in root)
+
 """Gate3 归因引擎 — 从指标级回归定位到 decision/tool_call 级根因。
 
 当 Gate3 检测到回归（latency_p95 上升、success_rate 下降等），

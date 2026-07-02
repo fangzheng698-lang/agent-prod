@@ -1,3 +1,6 @@
+# Copyright (c) 2026 fang.zheng
+# License: MIT (see LICENSE file in root)
+
 """配置 Schema — Pydantic 模型校验 config.yaml 启动时检查。"""
 
 from __future__ import annotations

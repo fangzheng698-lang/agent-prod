@@ -1,3 +1,6 @@
+# Copyright (c) 2026 fang.zheng
+# License: MIT (see LICENSE file in root)
+
 """FastAPI 请求/响应模型。"""
 
 from pydantic import BaseModel, Field

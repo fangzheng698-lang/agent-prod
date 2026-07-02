@@ -1,3 +1,6 @@
+# Copyright (c) 2026 fang.zheng
+# License: MIT (see LICENSE file in root)
+
 """Phase 4.2: MessageLifecycle — 消息生命周期管理。
 
 消息在 session 中的创建/追加/截断/淘汰由统一的生命周期管理器处理。

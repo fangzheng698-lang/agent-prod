@@ -1,3 +1,6 @@
+# Copyright (c) 2026 fang.zheng
+# License: MIT (see LICENSE file in root)
+
 """LoopOrchestrator — 四阶段闭环 + Replay/Benchmark/Optimizer 全接入。
 
 Execution → Attribution → Optimization → Release

@@ -1,3 +1,6 @@
+# Copyright (c) 2026 fang.zheng
+# License: MIT (see LICENSE file in root)
+
 """Gate1: 执行验证门 — Schema 契约 + 预算校验。
 用 Pydantic V2 structured output 契约替代事后 if 检查。
 

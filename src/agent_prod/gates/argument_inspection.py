@@ -1,3 +1,6 @@
+# Copyright (c) 2026 fang.zheng
+# License: MIT (see LICENSE file in root)
+
 """工具参数安全检测 — 针对 elevated/dangerous 工具的参数级检查。
 
 即使工具名在声明/授权范围内，参数可能包含恶意意图:

@@ -1,3 +1,6 @@
+# Copyright (c) 2026 fang.zheng
+# License: MIT (see LICENSE file in root)
+
 """工具风险分类库 — 所有已知 agent 工具按风险等级标记。
 
 三级风险:

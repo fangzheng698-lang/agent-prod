@@ -1,3 +1,6 @@
+# Copyright (c) 2026 fang.zheng
+# License: MIT (see LICENSE file in root)
+
 """agent-prod Python SDK — 一行接入质量管道。
 
 Usage:

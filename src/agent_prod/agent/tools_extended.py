@@ -1,3 +1,6 @@
+# Copyright (c) 2026 fang.zheng
+# License: MIT (see LICENSE file in root)
+
 """Phase 8.2: Extended Tools — web_search, file_read, shell_exec
 
 工具注册到 app/tools.py 的 ToolRegistry，供 agent 调用。

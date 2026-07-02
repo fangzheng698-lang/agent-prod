@@ -1,3 +1,6 @@
+# Copyright (c) 2026 fang.zheng
+# License: MIT (see LICENSE file in root)
+
 """SQLite 持久化状态管理。使用标准 sqlite3。"""
 
 from __future__ import annotations

@@ -1,3 +1,6 @@
+# Copyright (c) 2026 fang.zheng
+# License: MIT (see LICENSE file in root)
+
 """Adaptivity — self-improving systems (causal attribution, data flywheel, adaptive thresholds, loop orchestrator)."""
 
 from .causal_attributor import (

@@ -1,3 +1,6 @@
+# Copyright (c) 2026 fang.zheng
+# License: MIT (see LICENSE file in root)
+
 """配置系统。pydantic-settings 自动从 .env 和环境变量加载。
 
 Phase 10: Embedded-first defaults — no external infrastructure required.

@@ -1,3 +1,6 @@
+# Copyright (c) 2026 fang.zheng
+# License: MIT (see LICENSE file in root)
+
 """Phase 4.3: CrossSessionMemory — 跨会话记忆。
 
 用户在不同 session 之间的偏好/事实/习惯能被新 session 继承。

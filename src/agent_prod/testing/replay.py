@@ -1,3 +1,6 @@
+# Copyright (c) 2026 fang.zheng
+# License: MIT (see LICENSE file in root)
+
 """Phase 7.2: Replay — 录制+回放机制。
 
 记录每次 Agent 执行的完整对话轮次，支持事后重放和对比。

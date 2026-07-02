@@ -1,3 +1,6 @@
+# Copyright (c) 2026 fang.zheng
+# License: MIT (see LICENSE file in root)
+
 """工具执行器 — 方案 A (Gateway 工具代理) 的运行层。
 
 Gate0 通过后，由 ToolExecutor 在受限沙箱环境中执行工具。

@@ -1,3 +1,6 @@
+# Copyright (c) 2026 fang.zheng
+# License: MIT (see LICENSE file in root)
+
 """统一错误码枚举 — agent-prod API 所有错误类型。"""
 
 from enum import Enum

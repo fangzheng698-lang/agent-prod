@@ -1,3 +1,6 @@
+# Copyright (c) 2026 fang.zheng
+# License: MIT (see LICENSE file in root)
+
 """Phase 7.4: GateStress — 并发压力测试。
 
 GateStressRunner runs concurrent gate validations against the pipeline

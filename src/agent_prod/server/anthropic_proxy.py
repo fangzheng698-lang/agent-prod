@@ -1,3 +1,6 @@
+# Copyright (c) 2026 fang.zheng
+# License: MIT (see LICENSE file in root)
+
 """Anthropic Messages API ↔ OpenAI Chat Completions format conversion.
 
 For the proxy endpoint: Claude Code sends Anthropic-format requests,

@@ -31,6 +31,9 @@ logger = logging.getLogger(__name__)
 @dataclass
 class Gate5Config:
     """Gate5 审计配置"""
+
+# Copyright (c) 2026 fang.zheng
+# License: MIT (see LICENSE file in root)
     mode: str = "enforce"  # enforce | observe — observe 模式下跳过人工审批要求
     skip_human_approval: bool = False  # 自动通过审批项（开发/CI 场景）
     release_window_start: int = 9

@@ -1,3 +1,6 @@
+# Copyright (c) 2026 fang.zheng
+# License: MIT (see LICENSE file in root)
+
 """Gate6: 答案正确性评估门 — LLM-as-judge / 精确匹配 / 语义相似度。
 
 独立于 Gate3（性能回归），专门评估 agent 输出的答案是否满足质量要求。
@@ -35,9 +38,9 @@ class Gate6Config:
     """Gate6 评估配置"""
 
     enabled: bool = True
-    evaluator: str = "checklist"  # checklist | llm-judge | exact-match | semantic | mock
-    pass_threshold: float = 0.70
-    timeout_seconds: float = 30.0
+    evaluator: str = "checklist"  # checklist | llm-judge | exact-match | semantic | mock | no-ref-llm
+    pass_threshold: float = 0.58
+    timeout_seconds: float = 60.0
     fallback_on_timeout: str = "pass"   # pass | reject | skip
     llm_model: str = ""     # 空则用 OPENAI_MODEL
     llm_endpoint: str = ""

@@ -28,6 +28,9 @@ DEFAULT_OUTPUT = "data/execution_log.jsonl"
 
 def parse_hermes_session(session_path: Path) -> ExecutionLogRecord | None:
     """Convert a single Hermes session file to an ExecutionLogRecord."""
+
+# Copyright (c) 2026 fang.zheng
+# License: MIT (see LICENSE file in root)
     try:
         with open(session_path) as f:
             sess = json.load(f)

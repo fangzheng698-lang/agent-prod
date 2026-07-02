@@ -1,3 +1,6 @@
+# Copyright (c) 2026 fang.zheng
+# License: MIT (see LICENSE file in root)
+
 """Phase 6.2: Evaluation Loop — 自动评估改进效果。
 
 比较两个版本 (baseline vs candidate) 的执行结果，计算效率得分和判定。

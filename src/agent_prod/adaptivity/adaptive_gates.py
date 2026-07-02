@@ -1,3 +1,6 @@
+# Copyright (c) 2026 fang.zheng
+# License: MIT (see LICENSE file in root)
+
 """Adaptive Gates — 动态阈值替代固定常量。
 
 Evolution: 固定阈值 (1.2, 0.95, 50) → EWMA + 标准差带 → 自适应门禁。

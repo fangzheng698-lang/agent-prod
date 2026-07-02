@@ -1,3 +1,6 @@
+# Copyright (c) 2026 fang.zheng
+# License: MIT (see LICENSE file in root)
+
 #!/usr/bin/env python3
 """
 agent-prod CLI — manage quality gate thresholds, watchdog, and server.

@@ -1,3 +1,6 @@
+# Copyright (c) 2026 fang.zheng
+# License: MIT (see LICENSE file in root)
+
 """Phase 8.1: SSE Streaming — Server-Sent Events 流式响应。
 
 FastAPI SSE endpoint: GET /v1/chat/stream，每轮实时推送。

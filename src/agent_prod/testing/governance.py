@@ -1,3 +1,6 @@
+# Copyright (c) 2026 fang.zheng
+# License: MIT (see LICENSE file in root)
+
 """Phase 7.4: Governance — 治理面板。
 
 提供发布状态的文本化视图，包括灰度状态、候选版本列表和回滚历史。

@@ -91,6 +91,9 @@ except ImportError:
 def _log_gate(gate_name: str, passed: bool, duration_ms: float,
               improvement_id: str, details: dict | None = None):
     """结构化日志记录门禁结果"""
+
+# Copyright (c) 2026 fang.zheng
+# License: MIT (see LICENSE file in root)
     event = {
         "event": "gate_executed",
         "gate": gate_name,

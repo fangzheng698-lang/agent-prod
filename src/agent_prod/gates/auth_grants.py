@@ -1,3 +1,6 @@
+# Copyright (c) 2026 fang.zheng
+# License: MIT (see LICENSE file in root)
+
 """授权记录存储 — 用户对 agent 危险操作的显式授权。
 
 授权模型: 用户为特定的 (agent_type, tool_name) 颁发授权。

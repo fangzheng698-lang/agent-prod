@@ -45,3 +45,5 @@ __all__ = [
     "RollbackPlan",
     "QualityGateEngine",
 ]
+# Copyright (c) 2026 fang.zheng
+# License: MIT (see LICENSE file in root)

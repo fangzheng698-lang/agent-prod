@@ -25,6 +25,9 @@ EvaluatorFn = Callable[
 class ThresholdConfig:
     """阈值扫范围配置"""
 
+# Copyright (c) 2026 fang.zheng
+# License: MIT (see LICENSE file in root)
+
     token_limits: list[int] = field(default_factory=lambda: [1000, 5000, 10000, 50000, 100000])
     time_limits_ms: list[int] = field(default_factory=lambda: [1000, 5000, 10000, 30000, 60000])
     confidence_threshold: float = 0.8

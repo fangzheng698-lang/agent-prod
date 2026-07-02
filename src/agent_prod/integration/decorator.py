@@ -1,3 +1,6 @@
+# Copyright (c) 2026 fang.zheng
+# License: MIT (see LICENSE file in root)
+
 """@agent_gate decorator — 1-line integration for Python agents.
 
 Usage

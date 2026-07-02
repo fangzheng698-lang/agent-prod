@@ -1,3 +1,6 @@
+# Copyright (c) 2026 fang.zheng
+# License: MIT (see LICENSE file in root)
+
 """Phase 6.3: Optimization Suggestion — 分析执行日志，生成改进建议。
 
 检测: token 超支模式、重复 tool call、慢 gate、低门禁通过率。

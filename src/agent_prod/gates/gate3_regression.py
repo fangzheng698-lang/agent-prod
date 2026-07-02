@@ -26,6 +26,9 @@ except ImportError:
 
 class Regression(BaseModel):
     """单条回归检测结果"""
+
+# Copyright (c) 2026 fang.zheng
+# License: MIT (see LICENSE file in root)
     field: str
     old_value: Any = None
     new_value: Any = None

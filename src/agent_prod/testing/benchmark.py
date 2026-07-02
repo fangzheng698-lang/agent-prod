@@ -1,3 +1,6 @@
+# Copyright (c) 2026 fang.zheng
+# License: MIT (see LICENSE file in root)
+
 """Phase 7.3: Benchmark — 基准快照。
 
 在固定 prompt 集合上运行基准测试，保存快照并对比变化。

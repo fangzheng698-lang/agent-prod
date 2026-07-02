@@ -24,6 +24,9 @@ from .models import (
 
 class AgentTraceAdapter(ABC):
     """
+
+# Copyright (c) 2026 fang.zheng
+# License: MIT (see LICENSE file in root)
     将 AgentTrace 映射为门禁引擎所需的 Improvement。
 
     子类实现 to_improvement()，处理 agent 特有的字段映射逻辑。

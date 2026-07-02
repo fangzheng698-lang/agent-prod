@@ -31,6 +31,9 @@ from .models import GateName, GateResult, Improvement, RollbackLevel
 class GatePlugin(ABC):
     """Abstract base class for all quality gates.
 
+# Copyright (c) 2026 fang.zheng
+# License: MIT (see LICENSE file in root)
+
     Each gate is a plug-in that:
       1. Verifies an Improvement against its criteria
       2. Can rollback if verification fails

@@ -1,3 +1,6 @@
+# Copyright (c) 2026 fang.zheng
+# License: MIT (see LICENSE file in root)
+
 """Phase 7.1: LoopEngine — 三层闭环架构 (DEPRECATED — use LoopOrchestrator).
 
 .. deprecated::

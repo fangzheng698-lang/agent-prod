@@ -1,3 +1,6 @@
+# Copyright (c) 2026 fang.zheng
+# License: MIT (see LICENSE file in root)
+
 """Gate0: 权限准入 — 风险分级 + 声明校验 + 授权检查 + 参数安全检测。
 
 三层判断逻辑:

@@ -1,3 +1,6 @@
+# Copyright (c) 2026 fang.zheng
+# License: MIT (see LICENSE file in root)
+
 """Phase 4.4: TaskRun 状态机 — PENDING→GATE_EVAL→APPROVED|REJECTED|ROLLED_BACK。
 
 每次 Runtime 执行有清晰的状态流转，支撑后续飞轮闭环。

@@ -1,3 +1,6 @@
+# Copyright (c) 2026 fang.zheng
+# License: MIT (see LICENSE file in root)
+
 """agent_prod.trace — 统一 agent trace + adapter 注册表."""
 
 from .adapters import ADAPTER_REGISTRY, AgentTraceAdapter

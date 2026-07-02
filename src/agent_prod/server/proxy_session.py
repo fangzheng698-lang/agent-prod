@@ -1,3 +1,6 @@
+# Copyright (c) 2026 fang.zheng
+# License: MIT (see LICENSE file in root)
+
 """Multi-turn proxy session accumulation.
 
 Each connected agent window gets a ProxySession that:

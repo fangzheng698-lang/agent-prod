@@ -1,3 +1,6 @@
+# Copyright (c) 2026 fang.zheng
+# License: MIT (see LICENSE file in root)
+
 """用户反馈信号检测 — 从对话中自动检测纠错/不满/催促模式。
 
 非硬编码：基于语言学结构模式匹配，而非简单关键词列表。

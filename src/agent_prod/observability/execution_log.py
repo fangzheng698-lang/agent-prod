@@ -1,3 +1,6 @@
+# Copyright (c) 2026 fang.zheng
+# License: MIT (see LICENSE file in root)
+
 """Phase 6.1: Execution Log — 结构化执行日志。
 
 每次 Runtime 执行的完整记录保存到 JSONL 文件。

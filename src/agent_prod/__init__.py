@@ -1,3 +1,6 @@
+# Copyright (c) 2026 fang.zheng
+# License: MIT (see LICENSE file in root)
+
 """agent-prod — Enterprise-grade AI agent quality gate infrastructure.
 
 Quick start for any agent (one line of code):

@@ -1,3 +1,6 @@
+# Copyright (c) 2026 fang.zheng
+# License: MIT (see LICENSE file in root)
+
 """Data Flywheel — 统计基线 + EWMA 趋势 + 显著性检验。
 
 从硬编码阈值进化到数据驱动的自适应优化：

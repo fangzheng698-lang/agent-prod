@@ -45,6 +45,9 @@ def resolve_agent_thresholds(
     config: dict | None,
 ) -> dict[str, Any]:
     """
+
+# Copyright (c) 2026 fang.zheng
+# License: MIT (see LICENSE file in root)
     Resolve thresholds for a specific (gate, agent_type) pair.
 
     Resolution order:

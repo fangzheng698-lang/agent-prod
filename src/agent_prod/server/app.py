@@ -1,3 +1,6 @@
+# Copyright (c) 2026 fang.zheng
+# License: MIT (see LICENSE file in root)
+
 """agent-prod FastAPI application — routes, middleware, and initialization.
 
 Phase 13: Multi-agent /v1/agent/evaluate + /v1/tool/execute (Gate0 runtime).

@@ -1,3 +1,6 @@
+# Copyright (c) 2026 fang.zheng
+# License: MIT (see LICENSE file in root)
+
 """Phase 4.1: BudgetController — token/time 双重预算控制。
 
 每次 Runtime 执行受 token 和时间双重预算约束，超支自动截断并记录。

@@ -1,3 +1,6 @@
+# Copyright (c) 2026 fang.zheng
+# License: MIT (see LICENSE file in root)
+
 #!/usr/bin/env python3
 """Benchmark 自动跑分 — 对 Gate6 答案质量做定量评估。
 

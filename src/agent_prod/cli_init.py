@@ -1,3 +1,6 @@
+# Copyright (c) 2026 fang.zheng
+# License: MIT (see LICENSE file in root)
+
 """agent-prod init — 一键引导式初始化。
 
 引导用户逐步完成关键配置：

@@ -1,3 +1,6 @@
+# Copyright (c) 2026 fang.zheng
+# License: MIT (see LICENSE file in root)
+
 """11-state state machine for closed-loop orchestrator cycle.
 
 States: CANDIDATE → EXECUTING → EXECUTED → ATTRIBUTING → ATTRIBUTED

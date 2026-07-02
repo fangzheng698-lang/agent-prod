@@ -1,3 +1,6 @@
+# Copyright (c) 2026 fang.zheng
+# License: MIT (see LICENSE file in root)
+
 """Agent 运行时核心 — Run Loop with streaming support.
 
 Phase 8.1: Added stream_run() for SSE streaming.

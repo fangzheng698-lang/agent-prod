@@ -1,3 +1,6 @@
+# Copyright (c) 2026 fang.zheng
+# License: MIT (see LICENSE file in root)
+
 """Phase 11: Causal Attribution — Granger Causality + Counterfactual.
 
 Zero external dependencies (no statsmodels/scipy). All statistics from scratch:

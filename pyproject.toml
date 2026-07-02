@@ -8,6 +8,12 @@ version = "1.0.0"
 description = "Production AI agent quality gate and risk control framework for LLMOps, agent evaluation, regression detection, gray release, audit, and observability"
 readme = "README.md"
 license = {text = "MIT"}
+authors = [
+    {name = "fang.zheng", email = "fangzheng698@gmail.com"},
+]
+maintainers = [
+    {name = "fang.zheng", email = "fangzheng698@gmail.com"},
+]
 requires-python = ">=3.11"
 classifiers = [
     "Development Status :: 4 - Beta",

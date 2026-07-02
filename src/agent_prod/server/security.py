@@ -1,3 +1,6 @@
+# Copyright (c) 2026 fang.zheng
+# License: MIT (see LICENSE file in root)
+
 """Security middleware — API key auth + token-bucket rate limiting.
 
 Zero external dependencies. Pure stdlib + Starlette/FastAPI.

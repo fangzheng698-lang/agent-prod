@@ -1,3 +1,6 @@
+# Copyright (c) 2026 fang.zheng
+# License: MIT (see LICENSE file in root)
+
 """OpenAI 协议客户端。纯 httpx，无框架依赖。
 
 所有兼容 OpenAI 的 API（长亭百智云、DeepSeek、vLLM 等）都能用。

@@ -56,6 +56,9 @@ class GrayReport(BaseModel):
 class FlagEngine(ABC):
     """Feature Flag 抽象接口 — 生产 / 本地统一 API"""
 
+# Copyright (c) 2026 fang.zheng
+# License: MIT (see LICENSE file in root)
+
     @abstractmethod
     def get_variant(self, improvement_id: str, user_id: str = "") -> str:
         """返回 'variant_a' (新版本) 或 'baseline' (旧版本)"""

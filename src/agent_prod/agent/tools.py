@@ -1,3 +1,6 @@
+# Copyright (c) 2026 fang.zheng
+# License: MIT (see LICENSE file in root)
+
 """工具注册和执行。纯 Python，无框架依赖。"""
 
 from __future__ import annotations

@@ -35,6 +35,9 @@ except ImportError:
 class Gate7ExecutionConsistency:
     """执行一致性门 — 计划 vs 实际对比
 
+# Copyright (c) 2026 fang.zheng
+# License: MIT (see LICENSE file in root)
+
     支持 observe/enforce 双模式（与 Gate0 一致）：
       - observe（默认）: 发现偏离只记录不阻断，passed=True
       - enforce: 发现 critical 偏离直接拒绝

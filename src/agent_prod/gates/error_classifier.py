@@ -1,3 +1,6 @@
+# Copyright (c) 2026 fang.zheng
+# License: MIT (see LICENSE file in root)
+
 """Gate6 错误分类器 — 将答案不匹配归入可操作的错误类别。
 
 当 Gate6 检测到 score < threshold 时，ErrorClassifier 分析

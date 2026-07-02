@@ -1,3 +1,6 @@
+# Copyright (c) 2026 fang.zheng
+# License: MIT (see LICENSE file in root)
+
 """QClaw Session Watchdog — auto-monitor qclaw sessions for quality gate evaluation.
 
 Monitors ~/.qclaw/agents/main/sessions/ for new qclaw .jsonl session files.

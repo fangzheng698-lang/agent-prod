@@ -1,3 +1,6 @@
+# Copyright (c) 2026 fang.zheng
+# License: MIT (see LICENSE file in root)
+
 """Embedded Prometheus-compatible metrics endpoint.
 
 Zero external dependencies. Produces standard Prometheus text format.

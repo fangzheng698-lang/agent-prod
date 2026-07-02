@@ -1,3 +1,6 @@
+# Copyright (c) 2026 fang.zheng
+# License: MIT (see LICENSE file in root)
+
 """Shared Hermes session → AgentTrace parser.
 
 Used by both the watchdog (filesystem polling) and the Hermes plugin

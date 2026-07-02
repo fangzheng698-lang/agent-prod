@@ -1,3 +1,6 @@
+# Copyright (c) 2026 fang.zheng
+# License: MIT (see LICENSE file in root)
+
 """Phase 6.4: Release Manager — 发布状态管理。
 
 管理发布流程: candidate → gray_1% → gray_10% → gray_50% → production。

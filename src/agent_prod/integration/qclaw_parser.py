@@ -1,3 +1,6 @@
+# Copyright (c) 2026 fang.zheng
+# License: MIT (see LICENSE file in root)
+
 """qclaw session parser — converts qclaw .jsonl session files to AgentTrace format.
 
 qclaw stores each conversation as a JSONL file in:

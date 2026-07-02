@@ -43,6 +43,9 @@ def _build_decisions(
 ) -> list[dict[str, Any]]:
     """Convert Hermes message rows into AgentTrace Decision dicts.
 
+# Copyright (c) 2026 fang.zheng
+# License: MIT (see LICENSE file in root)
+
     Each assistant message with tool_calls becomes one Decision.
     Distributes session-level token counts across decisions so
     trace.total_tokens() returns a non-zero value (required by gate1).

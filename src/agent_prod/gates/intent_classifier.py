@@ -1,3 +1,6 @@
+# Copyright (c) 2026 fang.zheng
+# License: MIT (see LICENSE file in root)
+
 """LLM 意图分类器 — 针对可疑工具调用的语义级安全审查。
 
 当 Level 1/2 检测到可疑参数时，由独立 LLM 判断调用意图。
