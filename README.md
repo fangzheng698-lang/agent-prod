@@ -1,43 +1,11 @@
 # agent-prod
 
-[English](README.md) | [简体中文](README.zh-CN.md) | [Demo guide](docs/DEMO.md) | [Usage](docs/USAGE.md)
+[English](README.md) | [简体中文](README.zh-CN.md) | [Design](docs/DESIGN.md) | [MCP Integration](docs/MCP_INTEGRATION.md) | [Usage](docs/USAGE.md)
 
-**SonarQube for production AI agents.** agent-prod is a quality gate and risk
-control layer that decides whether an AI agent run, version, or release is safe
-enough for production.
-
-It checks the behavior, trace, cost, release state, audit context, answer
-quality, and execution consistency before production traffic sees the agent.
-
-Kubernetes' moat is not one scheduler implementation; it is the CRI/CNI/CSI
-interface design. agent-prod's moat is the quality-gate interface: Gate ABCs,
-Gate0-Gate7 lifecycle, attribution, regression baselines, and release-state
-semantics.
-
-## Proof Points
-
-| Signal | Evidence |
-|---|---|
-| 156 real sessions | Validated against real Hermes Agent sessions |
-| 4,345 tool calls | Used to exercise tool-risk and trace-integrity paths |
-| 3 models | Covered `feature/deepseek`, `lite v4-flash`, and `v4-flash` traces |
-| 186 tests | Current CI passes without warnings |
-
-## How It Works
-
-```mermaid
-flowchart LR
-    A[Agent run or release] --> B[Gate0-Gate7]
-    B --> C{Approve?}
-    C -->|yes| D[Production]
-    C -->|no| E[Reject / rollback / feedback]
-```
-
-Gate0-Gate7 covers permission checks, budget control, trace integrity,
-regression detection, gray release, audit, LLM answer quality, and execution
-consistency.
-
-## One-Line Integration
+**Quality gates for production AI agents.** agent-prod wraps any agent run or
+release in an 8-gate safety pipeline — permission, budget, trace integrity,
+regression, gray release, audit, answer quality, and execution consistency.
+Like tests for code, but for agent behavior.
 
 ```python
 from agent_prod import trace
@@ -47,81 +15,168 @@ result = trace(
     session_id="session-001",
     current_metrics={"final_response": "Paris", "success_rate": 0.99},
 )
+print(result["status"])  # "production" | "rejected"
 ```
 
-## MCP Server
+## Pipeline
 
-agent-prod exposes all 8 quality gates (Gate0–Gate7) as [MCP](https://modelcontextprotocol.io) tools,
-so any MCP-compatible agent (Claude Desktop, Cursor, Cline, etc.) can call quality-gate
-evaluations directly.
+```
+Agent run ──▶ Gate0 ──▶ Gate1 ──▶ Gate2 ──▶ Gate3 ──▶ Gate4 ──▶ Gate5 ──▶ Gate6 ──▶ Gate7 ──▶ Approve?
+              │         │          │          │          │          │          │          │
+             risk     budget    trace     regress.   gray      audit     answer    exec.
+             ACL      check     DAG       compare   rollout   policy    quality   consistency
+```
+
+| Gate | What it checks | When it blocks |
+|---|---|---|
+| **Gate0** Permission | Tool ACL, risky arg inspection, declared-tools enforcement | Undeclared or dangerous tool calls |
+| **Gate1** Budget | Token & time budgets per agent type, circuit breaker | Budget exceeded or LLM endpoint degraded |
+| **Gate2** Trace Integrity | LLM → tool DAG completeness, no orphan tool calls | Missing or unmapped LLM calls |
+| **Gate3** Regression | Latency/success-rate/quality drift vs. evolving baseline | Significant performance or quality drop |
+| **Gate4** Gray Release | Progressive rollout stages (1% → 10% → 50% → 100%) | Error-rate or latency spike per stage |
+| **Gate5** Release Audit | Policy-as-code rules: prior gates, rollback plan, human approval | Critical policy violation |
+| **Gate6** Answer Quality | Checklist evaluator (12 binary checks) or LLM-as-judge | Score below per-agent threshold |
+| **Gate7** Execution Consistency | Plan-to-output alignment, goal fulfillment | Off-plan or hallucinated execution |
+
+> **How this differs from eval frameworks:** Eval frameworks score a single
+> dimension (answer correctness) in isolation. agent-prod closes the loop —
+> permission → budget → trace → regression → release → audit → quality →
+> consistency — and rejects the run at the **first** failure. This is the
+> difference between "this answer scores 0.85" and "this agent run is not safe
+> for production." [See design philosophy →](docs/DESIGN.md)
+
+## Quick Start
 
 ```bash
-# Install with MCP support
-pip install "agent-prod[mcp]"
-
-# Start the MCP server
-agent-prod-mcp
-```
-
-### Available Tools
-
-| Tool | Description |
-|---|---|
-| `evaluate_trace` | Full Gate0–Gate7 quality gate evaluation for an agent trace |
-| `check_tool_safety` | Single tool-call Gate0 preflight check — call before invoking risky tools |
-| `get_gate_stats` | Query historical evaluation stats |
-| `health_check` | Engine and repository health check |
-
-### Claude Desktop Configuration
-
-Add to your `claude_desktop_config.json`:
-
-```json
-{
-  "mcpServers": {
-    "agent-prod": {
-      "command": "agent-prod-mcp"
-    }
-  }
-}
-```
-
-> **Note:** Full integration guide for Claude Desktop, Cursor, Cline, Hermes, and any MCP client →
-> [docs/MCP_INTEGRATION.md](docs/MCP_INTEGRATION.md).
-> The `config.yaml` storage backend defaults to `file` for persistence.
-> Set `AGENT_PROD_REPO` environment variable to customise the data path.
-
-## Quick Demo
-
-```bash
+# Install
 pip install agent-prod
+
+# Evaluate one trace — no server needed
+python -c "
+from agent_prod import trace
+result = trace(
+    agent='demo',
+    session_id='demo-1',
+    decisions=[{
+        'decision_id': 'd1',
+        'model': 'gpt-4',
+        'prompt_tokens': 100,
+        'completion_tokens': 50,
+        'tool_calls': [
+            {'tool_name': 'web_search', 'arguments': {'q': 'weather'}, 'success': True},
+        ],
+    }],
+    current_metrics={'final_response': 'Sunny, 22°C', 'success_rate': 1.0},
+    human_approver='demo',
+)
+print(f'Passed: {result[\"status\"]}')
+"
+
+# Or start the server
 agent-prod configure
 agent-prod serve
-
 python examples/basic_trace.py
 agent-prod stats
 ```
 
-![agent-prod terminal demo preview](docs/assets/demo-terminal.svg)
+![agent-prod terminal demo](docs/assets/demo-terminal.svg)
 
-For a 15-second terminal recording script, see [docs/DEMO.md](docs/DEMO.md).
+## MCP Server — Use From Any Agent
 
-## Different From Existing Agent Projects
+agent-prod exposes all 8 gates as [MCP](https://modelcontextprotocol.io) tools.
+Claude Desktop, Cursor, Cline — any MCP client can call quality-gate
+evaluations directly.
 
-| Project type | What it does | Where agent-prod fits |
+```bash
+pip install "agent-prod[mcp]"
+agent-prod-mcp
+```
+
+```json
+// claude_desktop_config.json
+{ "mcpServers": { "agent-prod": { "command": "agent-prod-mcp" } } }
+```
+
+| MCP Tool | Purpose |
+|---|---|
+| `evaluate_trace` | Full Gate0–Gate7 pipeline for an agent trace |
+| `check_tool_safety` | Single tool-call Gate0 preflight |
+| `get_gate_stats` | Historical evaluation stats |
+| `health_check` | Engine and repository health |
+
+→ [Full MCP integration guide](docs/MCP_INTEGRATION.md)
+
+## GatePlugin Interface — Extend With One Class
+
+Every gate is a plug-in. Write your own gate in ~30 lines:
+
+```python
+from agent_prod.gates.interface import GatePlugin, register_gate
+from agent_prod.gates.models import GateName, GateResult, Improvement
+
+class MyCustomGate(GatePlugin):
+    name = GateName("my_custom_gate")
+    rollback_level = RollbackLevel.L1
+
+    def verify(self, improvement: Improvement) -> GateResult:
+        if improvement.candidate_output.get("my_field", 0) >= 90:
+            return GateResult(gate_name=self.name, passed=True, reason="OK")
+        return GateResult(gate_name=self.name, passed=False, reason="my_field < 90")
+
+    def rollback(self, improvement: Improvement) -> None:
+        pass
+
+    @classmethod
+    def from_config(cls, config, name):
+        return cls()
+
+register_gate(GateName("my_custom_gate"), MyCustomGate)
+```
+
+The engine discovers gates through the `GatePlugin` ABC — no monkey-patching,
+no framework fork. Add a gate, register it, and `from_yaml()` picks it up.
+→ [Full interface design →](docs/DESIGN.md)
+
+## Proof Points
+
+| Signal | Evidence |
+|---|---|
+| 217 real agent sessions | Validated against Hermes traces |
+| 4,345 tool calls | Exercised tool-risk and trace-integrity paths |
+| 194 tests | CI passes without warnings |
+| Dogfood report | [docs/DOGFOOD_REPORT.md](docs/DOGFOOD_REPORT.md) — self-evaluation with 70% pass rate |
+
+## Why Not Just an Eval Framework?
+
+| | Eval frameworks | agent-prod |
 |---|---|---|
-| LangChain / CrewAI / AutoGen | Build and orchestrate agents | Controls production risk after agents are built |
-| Eval frameworks | Run offline tests | Gates live runs, versions, regressions, and rollouts |
-| Observability tools | Monitor what happened | Approves, rejects, rolls back, and generates feedback |
+| **Scope** | Score one answer | Gate the whole run (8 dimensions) |
+| **Flow** | Submit → score → report | Gate0 → Gate1 → … → reject early |
+| **Persistence** | Stateless | Full state machine: candidate → production → rejected → rolled back |
+| **Complexity** | One metric | Policy, audit trail, gray release, auto-rollback |
+| **Integration** | Standalone | SDK + MCP server + config-as-code |
+
+Eval frameworks answer *"how good is this output"*. agent-prod answers
+*"is this agent run safe for production"*.
+
+## Deployment
+
+```bash
+# One command — Postgres + agent-prod + MCP
+docker compose up -d
+```
+
+See [docker-compose.yml](docker-compose.yml) and [.env.example](.env.example).
 
 ## Start Here
 
+- [Design document](docs/DESIGN.md) — architecture decisions, GatePlugin ABC, and pipeline topology
 - [MCP Integration guide](docs/MCP_INTEGRATION.md) — Claude Desktop, Cursor, Cline, Hermes setup
-- [Examples](examples/) - runnable traces and release scenarios
-- [Usage guide](docs/USAGE.md) - CLI, configuration, and Gate0-Gate7 details
-- [Discovery copy](docs/DISCOVERY.md) - multilingual descriptions and keywords
-- [Comparison analysis](COMPARISON_ANALYSIS.md) - OctoBus / agent-compose / agent-prod positioning
-- [Roadmap](ROADMAP.md) - production validation plan and next proof points
+- [Examples](examples/) — runnable traces and release scenarios
+- [Usage guide](docs/USAGE.md) — CLI, configuration, Gate0–Gate7 details
+- [Dogfood report](docs/DOGFOOD_REPORT.md) — we ate our own dog food
+- [Calibration guide](docs/CALIBRATION.md) — tuning Gate5/Gate6 for your agents
+- [Roadmap](ROADMAP.md) — production validation plan and next proof points
 
 ## License
 
