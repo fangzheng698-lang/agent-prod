@@ -5,6 +5,7 @@ Avoids circular imports between cli.py and cli_*.py modules.
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 

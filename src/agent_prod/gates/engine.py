@@ -5,6 +5,7 @@ Phase 1: 超时/重试/异常包裹 + 结构化日志 + YAML 配置加载
 from __future__ import annotations
 
 import logging
+import os
 import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from pathlib import Path
@@ -145,6 +146,7 @@ def load_config(config_path: str | Path | None = None) -> dict:
 
 def create_repository(config: dict | None = None) -> ImprovementRepository:
     """根据配置创建持久化仓库"""
+    import os
     if not config:
         return MemoryRepository()
 
