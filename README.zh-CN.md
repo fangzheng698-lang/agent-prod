@@ -123,7 +123,8 @@ agent-prod-mcp
 }
 ```
 
-> **提示：** `config.yaml` 存储后端默认为 `file` 持久化。可通过 `AGENT_PROD_REPO` 环境变量自定义数据路径。
+> **提示：** 详细接入配置请参考 [MCP 接入文档](docs/MCP_INTEGRATION.md)，包含 Claude Desktop、Cursor、Cline、Hermes 等客户端的完整配置。
+> `config.yaml` 存储后端默认为 `file` 持久化。可通过 `AGENT_PROD_REPO` 环境变量自定义数据路径。
 
 ## 关键词
 

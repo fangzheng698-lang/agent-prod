@@ -88,7 +88,9 @@ Add to your `claude_desktop_config.json`:
 }
 ```
 
-> **Note:** The `config.yaml` storage backend defaults to `file` for persistence.
+> **Note:** Full integration guide for Claude Desktop, Cursor, Cline, Hermes, and any MCP client →
+> [docs/MCP_INTEGRATION.md](docs/MCP_INTEGRATION.md).
+> The `config.yaml` storage backend defaults to `file` for persistence.
 > Set `AGENT_PROD_REPO` environment variable to customise the data path.
 
 ## Quick Demo
@@ -117,6 +119,7 @@ For a 15-second terminal recording script, see [docs/DEMO.md](docs/DEMO.md).
 
 ## Start Here
 
+- [MCP Integration guide](docs/MCP_INTEGRATION.md) — Claude Desktop, Cursor, Cline, Hermes setup
 - [Examples](examples/) - runnable traces and release scenarios
 - [Usage guide](docs/USAGE.md) - CLI, configuration, and Gate0-Gate7 details
 - [Discovery copy](docs/DISCOVERY.md) - multilingual descriptions and keywords
