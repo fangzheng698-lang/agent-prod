@@ -36,6 +36,7 @@ dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
 ]
+mcp = ["mcp>=1.0"]
 
 [project.urls]
 Homepage = "https://github.com/fangzheng698-lang/agent-prod"
@@ -43,6 +44,7 @@ Documentation = "https://github.com/fangzheng698-lang/agent-prod"
 
 [project.scripts]
 agent-prod = "agent_prod.cli:main"
+agent-prod-mcp = "agent_prod.mcp_server:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

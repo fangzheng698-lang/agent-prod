@@ -149,8 +149,8 @@ sandbox:
   - /tmp/
   - /var/tmp/
 storage:
-  backend: memory
-  file_path: ./data/improvements.json
+  backend: file
+  file_path: /Users/qz/Desktop/agent-prod/data/improvements.json
 tools:
   aliases:
     claude-code:
