@@ -87,6 +87,44 @@ result = trace(
 print(result)
 ```
 
+## MCP Server
+
+agent-prod 将 Gate0–Gate7 全部 8 道质量门暴露为 [MCP](https://modelcontextprotocol.io) 工具，
+任何兼容 MCP 的 Agent（Claude Desktop、Cursor、Cline 等）都可以直接调用质量门评估。
+
+```bash
+# 安装 MCP 支持
+pip install "agent-prod[mcp]"
+
+# 启动 MCP 服务
+agent-prod-mcp
+```
+
+### 可用工具
+
+| 工具 | 描述 |
+|---|---|
+| `evaluate_trace` | 完整的 Gate0–Gate7 质量门评估 |
+| `check_tool_safety` | 单次工具调用的 Gate0 前置安全检查 |
+| `get_gate_stats` | 查询历史评估统计 |
+| `health_check` | 引擎和仓库健康检查 |
+
+### Claude Desktop 配置
+
+在 `claude_desktop_config.json` 中添加：
+
+```json
+{
+  "mcpServers": {
+    "agent-prod": {
+      "command": "agent-prod-mcp"
+    }
+  }
+}
+```
+
+> **提示：** `config.yaml` 存储后端默认为 `file` 持久化。可通过 `AGENT_PROD_REPO` 环境变量自定义数据路径。
+
 ## 关键词
 
 AI Agent 质量门禁、智能体风控、智能体评估、大模型评估、LLMOps、智能体治理、回归检测、灰度发布、审计、可观测性、生产级 AI Agent。

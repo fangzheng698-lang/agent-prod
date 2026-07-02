@@ -51,6 +51,46 @@ result = trace(
 )
 ```
 
+## MCP Server
+
+agent-prod exposes all 8 quality gates (Gate0–Gate7) as [MCP](https://modelcontextprotocol.io) tools,
+so any MCP-compatible agent (Claude Desktop, Cursor, Cline, etc.) can call quality-gate
+evaluations directly.
+
+```bash
+# Install with MCP support
+pip install "agent-prod[mcp]"
+
+# Start the MCP server
+agent-prod-mcp
+```
+
+### Available Tools
+
+| Tool | Description |
+|---|---|
+| `evaluate_trace` | Full Gate0–Gate7 quality gate evaluation for an agent trace |
+| `check_tool_safety` | Single tool-call Gate0 preflight check — call before invoking risky tools |
+| `get_gate_stats` | Query historical evaluation stats |
+| `health_check` | Engine and repository health check |
+
+### Claude Desktop Configuration
+
+Add to your `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "agent-prod": {
+      "command": "agent-prod-mcp"
+    }
+  }
+}
+```
+
+> **Note:** The `config.yaml` storage backend defaults to `file` for persistence.
+> Set `AGENT_PROD_REPO` environment variable to customise the data path.
+
 ## Quick Demo
 
 ```bash
