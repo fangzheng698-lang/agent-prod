@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="360" viewBox="0 0 920 360" role="img" aria-label="agent-prod terminal demo">
+  <rect width="920" height="360" rx="10" fill="#111827"/>
+  <rect x="0" y="0" width="920" height="34" rx="10" fill="#1f2937"/>
+  <circle cx="18" cy="17" r="5" fill="#ef4444"/>
+  <circle cx="36" cy="17" r="5" fill="#f59e0b"/>
+  <circle cx="54" cy="17" r="5" fill="#10b981"/>
+  <text x="76" y="22" font-family="Menlo, Consolas, monospace" font-size="13" fill="#d1d5db">agent-prod demo</text>
+  <text x="22" y="66" font-family="Menlo, Consolas, monospace" font-size="15" fill="#93c5fd">$ agent-prod serve --no-watchdog</text>
+  <text x="22" y="92" font-family="Menlo, Consolas, monospace" font-size="15" fill="#d1d5db">Starting agent-prod on http://localhost:8000</text>
+  <text x="22" y="124" font-family="Menlo, Consolas, monospace" font-size="15" fill="#93c5fd">$ python examples/basic_trace.py</text>
+  <text x="22" y="150" font-family="Menlo, Consolas, monospace" font-size="15" fill="#d1d5db">{ "status": "production", "passed": true, "gates": 8 }</text>
+  <text x="22" y="182" font-family="Menlo, Consolas, monospace" font-size="15" fill="#93c5fd">$ agent-prod stats</text>
+  <text x="22" y="212" font-family="Menlo, Consolas, monospace" font-size="15" fill="#d1d5db">Agent              Evaluations   Pass Rate   Last Result</text>
+  <text x="22" y="238" font-family="Menlo, Consolas, monospace" font-size="15" fill="#d1d5db">example-agent      1             100%        production</text>
+  <text x="22" y="270" font-family="Menlo, Consolas, monospace" font-size="15" fill="#86efac">Gate0-Gate7 approved this run for production.</text>
+  <text x="22" y="318" font-family="Menlo, Consolas, monospace" font-size="13" fill="#9ca3af">Record the real flow with docs/DEMO.md and replace this preview with a GIF.</text>
+</svg>

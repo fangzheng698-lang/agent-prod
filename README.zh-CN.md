@@ -2,9 +2,9 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-agent-prod 是一个面向生产环境的 LLMOps 框架，用于 **AI Agent 评估、质量门禁、风险控制、回归检测、灰度发布、审计和可观测性**。
+agent-prod 是面向生产环境 AI Agent 的 **SonarQube**：在 Agent 运行、版本或发布进入生产环境前，做质量门禁、风险控制、回归检测、灰度发布、审计和可观测性检查。
 
-它解决的问题不是“如何构建 Agent”，而是“一个 Agent 运行、版本或发布是否足够安全，可以进入生产环境”。
+OctoBus 更像 agent 的网关层；agent-prod 是质量层。它解决的问题不是“如何构建 Agent”，而是“一个 Agent 运行、版本或发布是否足够安全，可以进入生产环境”。
 
 ## 为什么需要 agent-prod?
 

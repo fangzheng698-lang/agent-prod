@@ -4,7 +4,7 @@
 数据来源:
   - OctoBus:  https://github.com/chaitin/OctoBus (Go 1.26.1, 单二进制, AGPLv3)
   - agent-compose: https://github.com/chaitin/agent-compose (Go, public preview, AGPLv3)
-  - agent-prod: /root/experiment/agent-prod (Python 72 源文件 15108 行, v0.5.0, MIT)
+  - agent-prod: https://github.com/fangzheng698-lang/agent-prod (Python, v1.0.0, MIT)
 
 ---
 
@@ -21,8 +21,8 @@
 │  + 单端口多协议 + SQLite 持久化 + 访问日志                  │
 ├─────────────────────────────────────────────────────────────┤
 │  agent-prod      →  质量层："跑得对不对"                    │
-│  7道门准入 + 参数级检测 + 动态基线回归 + 灰度状态机         │
-│  + 答案正确性评估(Gate6) + 熔断降级 + 审计追踪              │
+│  Gate0-Gate7 准入 + 参数级检测 + 动态基线回归 + 灰度状态机 │
+│  + 答案正确性评估(Gate6) + 执行一致性(Gate7) + 审计追踪     │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -170,7 +170,7 @@ agent-compose 的调度最强（4 种 trigger + 可编程 script），agent-prod
 
 | | agent-compose | OctoBus | agent-prod |
 |--|---------------|---------|------------|
-| 状态 | public preview | 活跃维护 (内部长桥在用) | v0.5.0 即开即用 |
+| 状态 | public preview | 活跃维护 (内部长桥在用) | v1.0.0 即开即用 |
 | 回归测试 | Go unit + integration + e2e | Go unit + e2e | 52/52 pytest |
 | 压力测试 | ❌ | ❌ | ✅ GateStressRunner |
 | 安装方式 | task build + 二进制 | npm install -g | bash setup.sh + pip install -e . |
@@ -205,8 +205,8 @@ agent-compose 的调度最强（4 种 trigger + 可编程 script），agent-prod
 │      └── session 结束                             │
 │             │                                     │
 │             ▼                                     │
-│     agent-prod Gate0-6 (全量审计)                  │
-│     7道门: 准入→执行→完整性→回归→灰度→审计→答案     │
+│     agent-prod Gate0-Gate7 (全量审计)              │
+│     8道门: 准入→执行→完整性→回归→灰度→审计→答案→一致性 │
 │             │                                     │
 │          PASS / REJECT                             │
 └────────────────────────────────────────────────────┘
@@ -219,7 +219,7 @@ agent-compose 的调度最强（4 种 trigger + 可编程 script），agent-prod
 | 维度 | agent-compose | OctoBus | agent-prod |
 |------|---------------|---------|------------|
 | 部署可复制性 | 中 (Docker 依赖) | 高 (单二进制+Node.js) | 极高 (pip install, 零外部服务) |
-| 差异化程度 | 沙箱多驱动 | 多协议统一网关 | **7道门全闭环质量体系** |
+| 差异化程度 | 沙箱多驱动 | 多协议统一网关 | **Gate0-Gate7 全闭环质量体系** |
 | 壁垒深度 | 工程级 (3种 container runtime) | 标准级 (capset 权限模型) | **架构级 (参数检测+回归+灰度+答案质量)** |
 | 核心范式 | Container 编排 | Service mesh for agents | **Agent CI/CD pipeline** |
 
