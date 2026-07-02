@@ -55,7 +55,7 @@ from .gate1_execution import Gate1Config, Gate1Execution
 from .gate2_trace import Gate2TraceIntegrity
 from .gate3_regression import Gate3Config, Gate3Regression
 from .gate4_gray import Gate4Config, Gate4GrayRelease
-from .gate5_audit import Gate5ReleaseAudit
+from .gate5_audit import Gate5Config, Gate5ReleaseAudit
 from .gate6_answer_quality import Gate6AnswerQuality, Gate6Config
 from .gate7_execution_consistency import Gate7ExecutionConsistency
 from . import tool_risk  # 工具风险分类配置
@@ -302,7 +302,9 @@ class QualityGateEngine:
             config=gate4_config or Gate4Config.from_yaml(self.config),
             raw_config=self.config if self.config else None,
         )
-        self.gate5 = Gate5ReleaseAudit()
+        self.gate5 = Gate5ReleaseAudit(
+            config=Gate5Config.from_yaml(self.config),
+        )
         self.gate6 = Gate6AnswerQuality(
             config=Gate6Config.from_yaml(self.config),
         )

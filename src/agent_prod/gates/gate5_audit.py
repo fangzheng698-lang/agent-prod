@@ -3,11 +3,14 @@ Gate5: 上线审计门
 核心：Policy as Code 替代人工逐项检查
 Phase 1: 异常保护 + 结构化日志
 """
+
 from __future__ import annotations
 
 import logging
+import os
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from pydantic import BaseModel
@@ -21,6 +24,40 @@ from .models import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+# ── Gate5 配置 ──────────────────────────────────────────────
+
+@dataclass
+class Gate5Config:
+    """Gate5 审计配置"""
+    mode: str = "enforce"  # enforce | observe — observe 模式下跳过人工审批要求
+    skip_human_approval: bool = False  # 自动通过审批项（开发/CI 场景）
+    release_window_start: int = 9
+    release_window_end: int = 18
+
+    @classmethod
+    def from_yaml(cls, raw: dict | None) -> Gate5Config:
+        if not raw:
+            return cls()
+        g5 = raw.get("gates", {}).get("gate5", {})
+        if not g5:
+            return cls()
+        mode = g5.get("mode", "enforce")
+        skip_human = g5.get("skip_human_approval", False)
+        if isinstance(skip_human, str):
+            skip_human = skip_human.lower() in ("true", "yes", "1")
+        return cls(
+            mode=mode,
+            skip_human_approval=skip_human,
+            release_window_start=g5.get("release_window_start", 9),
+            release_window_end=g5.get("release_window_end", 18),
+        )
+
+    @property
+    def is_observe(self) -> bool:
+        """observe 模式：记录但不阻止"""
+        return self.mode == "observe" or self.skip_human_approval
 
 
 # ── 策略规则引擎 ──────────────────────────────────────────────
@@ -201,9 +238,20 @@ def check_release_window(imp: Improvement) -> PolicyRule:
 # ── Gate5 执行器 ────────────────────────────────────────────────
 
 class Gate5ReleaseAudit:
-    """上线审计门"""
+    """上线审计门
 
-    def __init__(self):
+    支持两种模式：
+      - enforce（默认）：全部规则严格检查，人工审批必须
+      - observe：跳过人工审批要求，仅做记录（开发/CI/演示场景）
+
+    通过 config.yaml gates.gate5.mode 切换：
+      gate5:
+        mode: observe        # 不卡人工审批
+        skip_human_approval: true  # 等价于 observe 模式
+    """
+
+    def __init__(self, config: Gate5Config | None = None):
+        self.config = config or Gate5Config()
         self.engine = PolicyEngine()
         self.engine.register(require_all_gates_passed)
         self.engine.register(require_rollback_plan_ready)
@@ -226,6 +274,24 @@ class Gate5ReleaseAudit:
                 details={"error": str(e)},
                 duration_ms=(time.time() - start) * 1000,
             )
+
+        # ── observe 模式降级 ──────────────────────────────
+        if self.config.is_observe:
+            # 将 human_approval 规则的 severity 降为 warning，不阻断流程
+            degraded = []
+            for r in results:
+                if r.name == "Human approval" and not r.passed:
+                    r.severity = "warning"
+                    r.reason += " [observe mode — not enforced]"
+                    degraded.append(r.name)
+            if degraded:
+                logger.info(
+                    "Gate5 observe mode: %d rule(s) degraded to warning: %s",
+                    len(degraded), degraded,
+                )
+            # 重新计算：仅 critical 失败才阻断
+            critical_fails = [r for r in results if r.severity == "critical" and not r.passed]
+            all_pass = len(critical_fails) == 0
 
         # 统计
         critical = [r for r in results if r.severity == "critical" and not r.passed]

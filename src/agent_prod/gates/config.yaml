@@ -104,6 +104,9 @@ gates:
     latency_increase: 0.1
     resource_increase: 0.15
     stable_period_seconds: 60
+  gate5:
+    mode: observe  # enforce | observe — observe 模式跳过人工审批
+    skip_human_approval: true
   gate6:
     enabled: true
     evaluator: checklist

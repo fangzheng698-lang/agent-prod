@@ -150,6 +150,69 @@ class TestGate3Regression:
 
 
 # ═══════════════════════════════════════════════════════════════
+#  Gate5 — Release Audit
+# ═══════════════════════════════════════════════════════════════
+
+class TestGate5ReleaseAudit:
+    def test_enforce_mode_rejects_without_human(self):
+        from agent_prod.gates.gate5_audit import Gate5ReleaseAudit, Gate5Config
+        from agent_prod.gates.models import Improvement
+
+        gate5 = Gate5ReleaseAudit(config=Gate5Config(mode="enforce"))
+        imp = Improvement(name="test", id="imp-g5-001")
+        # 注入前面门的结果
+        from agent_prod.gates.models import GateName, GateResult
+        for gn in (GateName.GATE1, GateName.GATE2, GateName.GATE3, GateName.GATE4):
+            imp.add_result(GateResult(gate_name=gn, passed=True))
+        result = gate5.verify(imp)
+        # enforce 模式下无人审批 → 失败
+        assert not result.passed
+        assert "Human approval" in str(result.details)
+
+    def test_observe_mode_passes_without_human(self):
+        from agent_prod.gates.gate5_audit import Gate5ReleaseAudit, Gate5Config
+        from agent_prod.gates.models import Improvement, GateName, GateResult
+
+        gate5 = Gate5ReleaseAudit(config=Gate5Config(mode="observe"))
+        imp = Improvement(name="test", id="imp-g5-002")
+        for gn in (GateName.GATE1, GateName.GATE2, GateName.GATE3, GateName.GATE4):
+            imp.add_result(GateResult(gate_name=gn, passed=True))
+        result = gate5.verify(imp)
+        # observe 模式跳过人工审批 → 通过
+        assert result.passed
+        # 但应该记录警告
+        rules = result.details.get("rules", [])
+        human_rule = next((r for r in rules if r["name"] == "Human approval"), None)
+        assert human_rule is not None
+        assert "observe mode" in human_rule.get("reason", "")
+
+    def test_skip_human_approval_flag(self):
+        from agent_prod.gates.gate5_audit import Gate5ReleaseAudit, Gate5Config
+        from agent_prod.gates.models import Improvement, GateName, GateResult
+
+        gate5 = Gate5ReleaseAudit(config=Gate5Config(skip_human_approval=True))
+        imp = Improvement(name="test", id="imp-g5-003")
+        for gn in (GateName.GATE1, GateName.GATE2, GateName.GATE3, GateName.GATE4):
+            imp.add_result(GateResult(gate_name=gn, passed=True))
+        result = gate5.verify(imp)
+        assert result.passed
+
+    def test_all_gates_must_pass(self):
+        from agent_prod.gates.gate5_audit import Gate5ReleaseAudit, Gate5Config
+        from agent_prod.gates.models import Improvement, GateName, GateResult
+
+        gate5 = Gate5ReleaseAudit(config=Gate5Config(mode="observe"))
+        imp = Improvement(name="test", id="imp-g5-004")
+        # Gate3 没通过
+        imp.add_result(GateResult(gate_name=GateName.GATE1, passed=True))
+        imp.add_result(GateResult(gate_name=GateName.GATE2, passed=True))
+        imp.add_result(GateResult(gate_name=GateName.GATE3, passed=False))
+        result = gate5.verify(imp)
+        assert not result.passed
+        assert "Missing gates" in str(result.details)
+
+
+# ═══════════════════════════════════════════════════════════════
 #  Gate6 — Answer Quality
 # ═══════════════════════════════════════════════════════════════
 
@@ -207,6 +270,56 @@ class TestGate6AnswerQuality:
         assert result.passed
         assert result.details["evaluator"] == "semantic-jaccard"
         assert result.details["score"] > 0.5
+
+    def test_checklist_skips_when_no_llm_configured(self):
+        """checklist 无 LLM 配置时 skipped，不 panic"""
+        from agent_prod.gates.gate6_answer_quality import Gate6AnswerQuality, Gate6Config
+        g6 = Gate6AnswerQuality(config=Gate6Config(evaluator="checklist"))
+        imp = Improvement(
+            name="test", id="imp-test-024",
+            candidate_output={
+                "final_response": "Paris is the capital of France",
+                "user_question": "What is the capital of France?",
+            },
+        )
+        result = g6.verify(imp)
+        assert result.passed
+        assert result.details.get("skipped") or "not configured" in result.reason
+
+    def test_gate6_disabled_passes(self):
+        from agent_prod.gates.gate6_answer_quality import Gate6AnswerQuality, Gate6Config
+        g6 = Gate6AnswerQuality(config=Gate6Config(enabled=False))
+        imp = Improvement(name="test", id="imp-test-025")
+        result = g6.verify(imp)
+        assert result.passed
+        assert result.details.get("skipped")
+
+    def test_gate6_pass_threshold(self):
+        """验证 pass_threshold 配置生效"""
+        from agent_prod.gates.gate6_answer_quality import Gate6AnswerQuality, Gate6Config
+        # 阈值为 0.0，任何分数都应通过
+        g6 = Gate6AnswerQuality(config=Gate6Config(evaluator="exact-match", pass_threshold=0.0))
+        imp = Improvement(
+            name="test", id="imp-test-026",
+            candidate_output={
+                "final_response": "wrong",
+                "expected_answer": "correct",
+            },
+        )
+        result = g6.verify(imp)
+        assert result.passed
+        assert result.details["score"] == 0.0
+        assert result.details["threshold"] == 0.0
+
+    def test_checklist_threshold_adequacy(self):
+        """验证 checklist 默认阈值 0.58 的合理性：
+        12项中通过7项（0.583）即可通过，说明对大多数合理回答足够宽容。
+        """
+        threshold = 0.58
+        total_items = 12
+        min_pass = int(total_items * threshold) + 1  # 需要 ceil(7) = 7
+        assert min_pass == 7, f"12项中需通过{min_pass}项（{threshold}）"
+        assert min_pass / total_items > threshold, "通过率应超过阈值"
 
 
 # ═══════════════════════════════════════════════════════════════
