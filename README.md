@@ -1,11 +1,39 @@
 # agent-prod — Production AI Agent Quality Gate & Risk Control Framework
 
+[English](README.md) | [简体中文](README.zh-CN.md)
+
 Production-grade LLMOps framework for **AI agent evaluation, quality gates,
 risk control, regression detection, gray release, audit, and observability**.
 It helps teams decide whether an AI agent run, version, or release is safe
 enough for production.
 
 **生产级 AI Agent 质量门禁与风控系统。** 任何 agent（Hermes、Claude Code、自研）都可以通过一行代码接入，经过 Gate0-Gate7 质量门评估，判断一次运行、一个版本或一次发布是否可以进入生产环境。
+
+## Why agent-prod?
+
+Most agent frameworks focus on building agents. agent-prod focuses on what
+happens before an agent is allowed to run in production.
+
+It checks permissions, budgets, trace integrity, regression risk, gray release
+status, audit requirements, answer quality, and execution consistency before
+approving an AI agent run or release.
+
+## Architecture
+
+```mermaid
+flowchart TD
+    A[Agent Run or Release] --> G0[Gate0 Permission]
+    G0 --> G1[Gate1 Budget]
+    G1 --> G2[Gate2 Trace Integrity]
+    G2 --> G3[Gate3 Regression]
+    G3 --> G4[Gate4 Gray Release]
+    G4 --> G5[Gate5 Audit]
+    G5 --> G6[Gate6 Answer Quality]
+    G6 --> G7[Gate7 Execution Consistency]
+    G7 --> D{Decision}
+    D -->|Pass| P[Approve for Production]
+    D -->|Fail| R[Reject, Rollback, or Feedback]
+```
 
 ## What Makes It Different
 
@@ -14,6 +42,13 @@ testing or offline benchmarks. It combines permission checks, budget control,
 trace integrity, regression detection, gray release, audit, LLM answer quality,
 execution consistency, causal attribution, and operational observability in one
 release gate pipeline.
+
+| Project type | Primary focus | agent-prod difference |
+|---|---|---|
+| LangChain / CrewAI / AutoGen | Build and orchestrate agents | Controls production risk after agents are built |
+| Eval frameworks | Offline evaluation | Gates real runs, releases, regressions, and rollout decisions |
+| Observability tools | Monitor behavior | Can approve, reject, roll back, and generate feedback |
+| CI tools | Test code | Tests agent behavior, tool use, cost, trace quality, and answer quality |
 
 Common search terms for this project: AI agent quality gate, AI agent risk
 control, LLMOps, agent evaluation, LLM evaluation, agent governance, regression
@@ -55,6 +90,9 @@ agent-prod configure
 # 启动服务
 agent-prod serve
 ```
+
+See [examples](examples/) for runnable traces, answer quality checks, regression
+detection, and gray release demos.
 
 ## 自研 Agent 接入（一行代码）
 
