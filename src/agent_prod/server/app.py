@@ -8,14 +8,17 @@ Phase 10: Embedded metrics, embedded quality gates.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import logging
 import os
 import threading
 import time
 import uuid
+from contextlib import asynccontextmanager
+from contextlib import suppress
 
-from fastapi import FastAPI, HTTPException, Body
+from fastapi import Body, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
@@ -115,8 +118,9 @@ def _start_watchdog_thread(port: int) -> None:
     """
     global _watchdog_active, _watchdog_thread
     try:
-        from agent_prod.ingest.watchdog import SessionWatchdog
         from pathlib import Path
+
+        from agent_prod.ingest.watchdog import SessionWatchdog
 
         wd = SessionWatchdog(
             sessions_dir=Path.home() / ".hermes" / "sessions",
@@ -126,10 +130,8 @@ def _start_watchdog_thread(port: int) -> None:
         _watchdog_active = True
 
         def _run():
-            try:
+            with suppress(Exception):
                 wd.start()
-            except Exception:
-                pass
 
         _watchdog_thread = threading.Thread(target=_run, daemon=True,
                                               name="agent-prod-watchdog")
@@ -139,14 +141,34 @@ def _start_watchdog_thread(port: int) -> None:
         logger.warning(f"Watchdog: failed to start ({e})")
 
 
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """Manage background startup tasks and local resources."""
+    await _startup_watchdog()
+    await _start_proxy_subsystems()
+    try:
+        yield
+    finally:
+        global _proxy_eval_task
+        if _proxy_eval_task:
+            _proxy_eval_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await _proxy_eval_task
+            _proxy_eval_task = None
+        if _heartbeat_monitor:
+            await _heartbeat_monitor.stop()
+        if store:
+            store.close()
+
+
 app = FastAPI(
     title="agent-prod",
     description="Enterprise Agent Quality Gate Platform — Gate0-Gate7 pipeline with answer quality evaluation",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 
-@app.on_event("startup")
 async def _startup_watchdog():
     """Auto-start Hermes session watchdog on server boot.
 
@@ -154,6 +176,9 @@ async def _startup_watchdog():
     No-op if already started via cmd_serve.
     """
     global _watchdog_active, _watchdog_thread
+    auto_start = os.environ.get("AGENT_PROD_WATCHDOG_AUTO_START", "true").lower()
+    if auto_start in {"0", "false", "no", "off"}:
+        return
     if _watchdog_active:
         return
     # Read port from uvicorn config or default
@@ -506,7 +531,7 @@ async def get_session_gates(session_id: str):
     imp_id = f"imp-{session_id}"
     try:
         get_fn = gateway.engine.repository.get
-        if asyncio.iscoroutinefunction(get_fn):
+        if inspect.iscoroutinefunction(get_fn):
             improvement = await get_fn(imp_id)
         else:
             improvement = get_fn(imp_id)
@@ -930,7 +955,7 @@ async def agent_stats(agent: str = "", limit: int = 100):
 
         # Use repository's list() method (all repos support it)
         all_improvements = repo.list(status=None, limit=limit + 100, offset=0)
-        if asyncio.iscoroutinefunction(repo.list):
+        if inspect.iscoroutinefunction(repo.list):
             all_improvements = await all_improvements
 
         for imp in all_improvements:
@@ -1306,7 +1331,6 @@ async def _proxy_eval_worker_v2():
             await _asyncio.sleep(1)
 
 
-@app.on_event("startup")
 async def _start_proxy_subsystems():
     """Start proxy session manager, heartbeat monitor, and eval worker."""
     global _proxy_session_manager, _heartbeat_monitor, _proxy_eval_task

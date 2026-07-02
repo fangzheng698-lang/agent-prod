@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
+from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -24,6 +25,8 @@ class StateStore:
         self._path.parent.mkdir(parents=True, exist_ok=True)
 
         self._local = threading.local()
+        self._connections: set[sqlite3.Connection] = set()
+        self._connections_lock = threading.Lock()
         self._init_db()
 
     def _get_conn(self) -> sqlite3.Connection:
@@ -33,7 +36,20 @@ class StateStore:
             self._local.conn.row_factory = sqlite3.Row
             self._local.conn.execute("PRAGMA journal_mode=WAL")
             self._local.conn.execute("PRAGMA synchronous=NORMAL")
+            with self._connections_lock:
+                self._connections.add(self._local.conn)
         return self._local.conn
+
+    def close(self) -> None:
+        """Close all SQLite connections opened by this store."""
+        with self._connections_lock:
+            connections = list(self._connections)
+            self._connections.clear()
+        for conn in connections:
+            with suppress(sqlite3.Error):
+                conn.close()
+        if hasattr(self._local, "conn"):
+            self._local.conn = None
 
     def _init_db(self):
         conn = self._get_conn()

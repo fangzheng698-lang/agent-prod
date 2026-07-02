@@ -112,9 +112,9 @@ ok(f"ADF: stationary={a1['stationary']} (p≈{a1['p_value']:.3f}), trending={a2[
 # ── 8. CausalAttributor — Full attribution pipeline ──
 print("\n── 8. CausalAttributor — Full pipeline ──")
 from agent_prod.observability.execution_log import ExecutionLogRecord
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
-now = datetime.utcnow()
+now = datetime.now(UTC)
 # Pre-change: stable performance (v3)
 pre_logs = []
 for i in range(30):

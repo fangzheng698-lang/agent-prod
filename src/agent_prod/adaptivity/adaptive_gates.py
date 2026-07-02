@@ -22,7 +22,7 @@ from __future__ import annotations
 import math
 from collections import deque
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 # ═══════════════════════════════════════════
 # Statistical helpers
@@ -47,6 +47,8 @@ def _std_ewma(prev_std: float, prev_mean: float, new_mean: float,
 
 class AdaptiveThreshold(BaseModel):
     """单指标自适应阈值。"""
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
     alpha: float = 0.3
     sigma_mult: float = 2.0           # μ ± k·σ
     window_size: int = 50             # 滚动窗口大小
@@ -57,9 +59,6 @@ class AdaptiveThreshold(BaseModel):
     mean: float = 0.0
     std: float = 0.0
     sample_count: int = 0
-
-    class Config:
-        arbitrary_types_allowed = True
 
     def observe(self, value: float):
         """记录一个新观测值。"""

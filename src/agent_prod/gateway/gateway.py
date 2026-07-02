@@ -11,6 +11,7 @@ Phase 3: 将 5 道门作为中间件接入 agent-prod API。
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 from pathlib import Path
 
@@ -217,7 +218,7 @@ class QualityGateGateway:
 
             # 异步安全持久化
             save_fn = self._engine.repository.save
-            if asyncio.iscoroutinefunction(save_fn):
+            if inspect.iscoroutinefunction(save_fn):
                 await save_fn(result)
             else:
                 save_fn(result)
@@ -339,7 +340,7 @@ class QualityGateGateway:
             )
 
             save_fn = self._engine.repository.save
-            if asyncio.iscoroutinefunction(save_fn):
+            if inspect.iscoroutinefunction(save_fn):
                 await save_fn(result)
             else:
                 save_fn(result)

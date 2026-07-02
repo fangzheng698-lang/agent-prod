@@ -10,12 +10,13 @@ import os
 # Must set env vars BEFORE importing app — module-level init reads them
 os.environ.setdefault("QUALITY_GATES_MODE", "memory")
 os.environ.setdefault("QUALITY_GATES_ENABLED", "true")
+os.environ.setdefault("AGENT_PROD_WATCHDOG_AUTO_START", "false")
 
+import pytest
 from fastapi.testclient import TestClient
 
 from agent_prod.server.app import app
 
-client = TestClient(app)
 
 SAMPLE_TRACE = {
     "agent": "generic",
@@ -53,23 +54,29 @@ SAMPLE_TRACE = {
 }
 
 
+@pytest.fixture
+def client():
+    with TestClient(app) as test_client:
+        yield test_client
+
+
 class TestEvaluateEndpoint:
     """E2E test against the live FastAPI app using TestClient."""
 
-    def test_health_returns_ok(self):
+    def test_health_returns_ok(self, client):
         resp = client.get("/health")
         assert resp.status_code == 200
         data = resp.json()
         assert data["status"] == "ok"
         assert data["quality_gates"] is True
 
-    def test_ready_returns_ok(self):
+    def test_ready_returns_ok(self, client):
         resp = client.get("/ready")
         assert resp.status_code == 200
         data = resp.json()
         assert data["ready"] is True
 
-    def test_evaluate_returns_gate_results(self):
+    def test_evaluate_returns_gate_results(self, client):
         resp = client.post("/v1/agent/evaluate", json=SAMPLE_TRACE)
         assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
 
@@ -93,7 +100,7 @@ class TestEvaluateEndpoint:
         assert "gate5_release_audit" in gate_names
         assert "gate6_answer_quality" in gate_names
 
-    def test_evaluate_minimal_payload(self):
+    def test_evaluate_minimal_payload(self, client):
         """Minimal valid payload — only required fields."""
         resp = client.post("/v1/agent/evaluate", json={
             "agent": "test-agent",
@@ -104,7 +111,7 @@ class TestEvaluateEndpoint:
         assert data["session_id"] == "ses_minimal"
         assert len(data["gates"]) == 8
 
-    def test_evaluate_missing_session_id(self):
+    def test_evaluate_missing_session_id(self, client):
         """Missing session_id: auto-generated, not an error."""
         resp = client.post("/v1/agent/evaluate", json={
             "agent": "test-agent",
@@ -113,7 +120,7 @@ class TestEvaluateEndpoint:
         data = resp.json()
         assert data["session_id"] != ""  # auto-generated
 
-    def test_evaluate_without_gateway_returns_503(self):
+    def test_evaluate_without_gateway_returns_503(self, client):
         """Can't easily test without gateway since it's module-level,
         but verify the endpoint at least validates the payload."""
         resp = client.post("/v1/agent/evaluate", json={
