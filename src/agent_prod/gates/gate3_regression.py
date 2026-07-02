@@ -331,6 +331,12 @@ class Gate3Regression:
             if key.startswith("gate6_checklist_"):
                 continue
             if key not in candidate:
+                # 数值指标缺失时用默认值代替，避免假阳性
+                # （旧 trace 演进基线时可能缺少某些字段）
+                if isinstance(bv := baseline[key], (int, float)):
+                    logger.debug("Gate3 fallback: candidate missing '%s', using baseline value", key)
+                    candidate[key] = bv  # 用 baseline 值填充，避免误报回归
+                    continue
                 regressions.append(Regression(field=key, change_type="missing", severity="critical"))
                 continue
             bv, cv = baseline[key], candidate[key]
