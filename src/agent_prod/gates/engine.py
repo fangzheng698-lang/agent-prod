@@ -149,14 +149,15 @@ def create_repository(config: dict | None = None) -> ImprovementRepository:
         return MemoryRepository()
 
     storage = config.get("storage", {})
-    backend = storage.get("backend", "memory")
+    backend = os.environ.get("STORAGE_BACKEND") or storage.get("backend", "memory")
 
     if backend == "file":
         file_path = storage.get("file_path", "/var/lib/quality_gates/improvements.json")
         logger.info("Using FileRepository: %s", file_path)
         return FileRepository(file_path)
     elif backend == "postgres":
-        dsn = storage.get("postgres", {}).get("dsn", "")
+        dsn = (storage.get("postgres", {}).get("dsn", "")
+               or os.environ.get("STORAGE_POSTGRES_DSN", ""))
         pool_size = storage.get("postgres", {}).get("pool_size", 5)
         logger.info("Using PostgresRepository: %s", dsn)
         from .repository import PostgresRepository

@@ -149,8 +149,11 @@ sandbox:
   - /tmp/
   - /var/tmp/
 storage:
-  backend: file
+  backend: file  # memory | file | postgres
   file_path: /Users/qz/Desktop/agent-prod/data/improvements.json
+  postgres:
+    dsn: postgresql://quality_gates:quality_gates_dev@localhost:5432/quality_gates
+    pool_size: 5
 tools:
   aliases:
     claude-code:
