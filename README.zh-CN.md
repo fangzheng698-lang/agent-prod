@@ -84,6 +84,63 @@ agent-prod-mcp
 
 → [完整 MCP 接入指南](docs/MCP_INTEGRATION.md)
 
+## MCP Registry — 发布、搜索、安装
+
+```bash
+# 发布你的 MCP 服务器
+agent-prod registry publish my-server \
+    --command "uvx my-server" \
+    --description "搜索和索引文档" \
+    --tags "search,docs"
+
+# 搜索服务器
+agent-prod registry search mcp
+
+# 列出本地注册表
+agent-prod registry list
+```
+
+→ [Registry 源码](src/agent_prod/registry/)
+
+## Agent Observability — OpenTelemetry Span
+
+将管线评估包装为 OpenTelemetry span，每条门是一段 span，可导出到任何
+OTLP 兼容后端（Grafana、Honeycomb、SigNoz）。
+
+```python
+from agent_prod.observability.otel import AgentSpanExporter
+
+exporter = AgentSpanExporter(endpoint="http://localhost:4317")
+exporter.export_pipeline(improvement, agent_type="hermes")
+# → Gate0–Gate7 spans 导出到可观测性后端
+```
+
+无硬依赖，不安装 opentelemetry 时自动降级为 no-op。
+`pip install opentelemetry-api opentelemetry-sdk opentelemetry-exporter-otlp` 激活。
+
+## A2A — Agent 间任务委托
+
+通过轻量协议在 Agent 之间委托任务，支持能力协商、部分成功语义和错误链归因。
+
+```python
+from agent_prod.a2a import A2AAgent, A2ATask, A2ADelegator
+
+class SearchAgent(A2AAgent):
+    capabilities = ["web_search", "news"]
+
+    def execute(self, task: A2ATask):
+        results = search(task.input["q"])
+        return {"results": results}
+
+delegator = A2ADelegator()
+delegator.register(SearchAgent())
+
+task = A2ATask(name="search", input={"q": "天气"}, required_capabilities=["web_search"])
+result = delegator.delegate(task)
+```
+
+附带 LangChain 适配器（`create_langchain_tool`），可接入现有 Agent 管线。
+
 ## GatePlugin 接口 — 继承一个类即可扩展
 
 每道门都是插件。~30 行代码写自己的门：
@@ -144,6 +201,9 @@ docker compose up -d  # Postgres + agent-prod + MCP
 
 - [设计文档](docs/DESIGN.md) — 架构决策、GatePlugin ABC、管线拓扑
 - [MCP 接入指南](docs/MCP_INTEGRATION.md) — Claude Desktop、Cursor、Cline、Hermes 配置
+- [MCP Registry](src/agent_prod/registry/) — 发布、搜索、安装 MCP 服务器
+- [A2A 协议](src/agent_prod/a2a/) — Agent 间任务委托
+- [可观测性](src/agent_prod/observability/otel.py) — Agent 运行 OpenTelemetry Span
 - [示例](examples/) — 可运行的 trace 和发布场景
 - [使用指南](docs/USAGE.md) — CLI、配置、Gate0–Gate7 详解
 - [自评估报告](docs/DOGFOOD_REPORT.md) — 我们吃自己的狗粮

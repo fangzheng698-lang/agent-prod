@@ -106,6 +106,66 @@ agent-prod-mcp
 
 → [Full MCP integration guide](docs/MCP_INTEGRATION.md)
 
+## MCP Registry — Publish, Search, Install
+
+```bash
+# Publish your MCP server
+agent-prod registry publish my-server \
+    --command "uvx my-server" \
+    --description "Search and index documentation" \
+    --tags "search,docs"
+
+# Search for servers
+agent-prod registry search mcp
+
+# List local registry
+agent-prod registry list
+```
+
+→ [Registry source](src/agent_prod/registry/)
+
+## Agent Observability — OpenTelemetry Spans
+
+Wrap pipeline evaluations with OpenTelemetry spans. Each gate becomes a span
+under an agent-run trace, exportable to any OTLP-compatible backend (Grafana,
+Honeycomb, SigNoz).
+
+```python
+from agent_prod.observability.otel import AgentSpanExporter
+
+exporter = AgentSpanExporter(endpoint="http://localhost:4317")
+exporter.export_pipeline(improvement, agent_type="hermes")
+# → Gate0–Gate7 spans exported to your observability backend
+```
+
+Zero hard dependency — works without opentelemetry installed. Activate with
+`pip install opentelemetry-api opentelemetry-sdk opentelemetry-exporter-otlp`.
+
+## A2A — Agent-to-Agent Delegation
+
+Delegate tasks between agents via a lightweight protocol with capability
+negotiation, partial-success semantics, and error chain attribution.
+
+```python
+from agent_prod.a2a import A2AAgent, A2ATask, A2ADelegator
+
+class SearchAgent(A2AAgent):
+    capabilities = ["web_search", "news"]
+
+    def execute(self, task: A2ATask):
+        results = search(task.input["q"])
+        return {"results": results}
+
+delegator = A2ADelegator()
+delegator.register(SearchAgent())
+
+task = A2ATask(name="search", input={"q": "weather"}, required_capabilities=["web_search"])
+result = delegator.delegate(task)
+```
+
+Comes with a LangChain adapter (`create_langchain_tool`) to plug into existing
+agent pipelines.
+
 ## GatePlugin Interface — Extend With One Class
 
 Every gate is a plug-in. Write your own gate in ~30 lines:
@@ -172,6 +232,9 @@ See [docker-compose.yml](docker-compose.yml) and [.env.example](.env.example).
 
 - [Design document](docs/DESIGN.md) — architecture decisions, GatePlugin ABC, and pipeline topology
 - [MCP Integration guide](docs/MCP_INTEGRATION.md) — Claude Desktop, Cursor, Cline, Hermes setup
+- [MCP Registry](src/agent_prod/registry/) — publish, search, and install MCP servers
+- [A2A Protocol](src/agent_prod/a2a/) — agent-to-agent delegation
+- [Observability](src/agent_prod/observability/otel.py) — OpenTelemetry spans for agent runs
 - [Examples](examples/) — runnable traces and release scenarios
 - [Usage guide](docs/USAGE.md) — CLI, configuration, Gate0–Gate7 details
 - [Dogfood report](docs/DOGFOOD_REPORT.md) — we ate our own dog food
