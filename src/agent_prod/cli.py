@@ -402,44 +402,78 @@ def cmd_logs(args: argparse.Namespace) -> None:
 
 def cmd_alert(args: argparse.Namespace) -> None:
     """Configure alerting for gate rejections."""
-    # Validate args
-    if args.enable and args.disable:
-        print("Error: cannot --enable and --disable simultaneously.")
-        sys.exit(1)
 
-    config = _load_config()
-    alerts = config.setdefault("alerts", {})
-    gates = config.setdefault("gates", {})
 
-    if args.show:
-        enabled = alerts.get("enabled", False)
-        status = "ENABLED" if enabled else "DISABLED"
-        webhook = alerts.get("webhook_url", alerts.get("webhook", "(not set)"))
-        alert_on = alerts.get("alert_on", "any")
-        print(f"\n  Alerting: {status}")
-        print(f"  Webhook:  {webhook}")
-        print(f"  Trigger:  {alert_on} gate rejection")
-        print()
+# ── Registry commands ──────────────────────────────────────────────
+
+def cmd_registry_publish(args: argparse.Namespace) -> None:
+    """Publish an MCP server to the registry."""
+    from agent_prod.registry import publish_entry
+
+    tags = [t.strip() for t in args.tags.split(",")] if args.tags else []
+    result = publish_entry(
+        name=args.name,
+        command=args.command,
+        description=args.description,
+        tags=tags,
+        author=args.author,
+        homepage=args.homepage,
+        repository=args.repository,
+        remote=args.remote,
+    )
+    print(f"✅ Published {args.name} to MCP registry")
+    print(f"   Command: {args.command}")
+    print(f"   Tags: {', '.join(tags) or '(none)'}")
+    if args.remote and "remote" in result:
+        print(f"   Remote ID: {result['remote'].get('id', 'unknown')}")
+
+
+def cmd_registry_search(args: argparse.Namespace) -> None:
+    """Search for MCP servers in the registry."""
+    from agent_prod.registry import search_entries
+
+    results = search_entries(args.query, local_only=not args.remote)
+    if not results:
+        print(f"No results found for '{args.query}'")
         return
 
-    if args.enable:
-        alerts["enabled"] = True
-        print("Alerting enabled.")
+    print(f"Found {len(results)} server(s) matching '{args.query}':")
+    print()
+    for r in results:
+        tags = ", ".join(r.get("tags", []))[:60]
+        print(f"  {r['name']}")
+        print(f"    {r.get('description', '')[:80]}")
+        print(f"    Command: {r.get('command', '')}")
+        if tags:
+            print(f"    Tags: {tags}")
+        print()
 
-    if args.disable:
-        alerts["enabled"] = False
-        print("Alerting disabled.")
 
-    if args.webhook:
-        alerts["webhook_url"] = args.webhook
-        alerts["enabled"] = True
-        print(f"Webhook URL set to: {args.webhook}")
+def cmd_registry_list(args: argparse.Namespace) -> None:
+    """List all locally registered MCP servers."""
+    from agent_prod.registry import LocalRegistry
 
-    if args.on:
-        alerts["alert_on"] = args.on
-        print(f"Alert trigger set to: {args.on} gate rejection")
+    registry = LocalRegistry()
+    entries = registry.list_all()
+    if not entries:
+        print("No MCP servers registered locally.")
+        print("Use 'agent-prod registry publish' to add one.")
+        return
 
-    _save_config(config)
+    print(f"Local MCP Registry ({registry.count()} server(s)):")
+    print()
+    for r in sorted(entries, key=lambda x: x["name"]):
+        tags = ", ".join(r.get("tags", []))[:60]
+        verified = " ✅" if r.get("verified") else ""
+        print(f"  {r['name']}{verified}")
+        print(f"    {r.get('description', '')[:80]}")
+        print(f"    Command: {r.get('command', '')}")
+        if tags:
+            print(f"    Tags: {tags}")
+        print()
+
+
+# ── alert ──
     print("Alert configuration updated.")
     print("Restart the server to apply: agent-prod serve")
 
@@ -559,6 +593,29 @@ def main(argv: list[str] | None = None) -> None:
     alert_parser.add_argument("--on", choices=["gate3", "gate6", "gate7", "any"], default="any",
                                help="Which gate rejections trigger alerts (default: any)")
     alert_parser.set_defaults(func=cmd_alert)
+
+    # ── registry ──
+    registry_parser = sub.add_parser("registry", help="MCP server registry operations")
+    registry_sub = registry_parser.add_subparsers(dest="registry_command")
+
+    reg_publish = registry_sub.add_parser("publish", help="Publish an MCP server to the registry")
+    reg_publish.add_argument("name", help="Server name")
+    reg_publish.add_argument("--command", required=True, help="Command to run the server (e.g. 'uvx my-server')")
+    reg_publish.add_argument("--description", required=True, help="Short description")
+    reg_publish.add_argument("--tags", help="Comma-separated tags")
+    reg_publish.add_argument("--author", default="", help="Author name")
+    reg_publish.add_argument("--homepage", default="", help="Project homepage URL")
+    reg_publish.add_argument("--repository", default="", help="Source repository URL")
+    reg_publish.add_argument("--remote", action="store_true", help="Also publish to remote registry")
+    reg_publish.set_defaults(func=cmd_registry_publish)
+
+    reg_search = registry_sub.add_parser("search", help="Search MCP servers in the registry")
+    reg_search.add_argument("query", help="Search query")
+    reg_search.add_argument("--remote", action="store_true", help="Also search remote registry")
+    reg_search.set_defaults(func=cmd_registry_search)
+
+    reg_list = registry_sub.add_parser("list", help="List all local MCP servers")
+    reg_list.set_defaults(func=cmd_registry_list)
 
     args = parser.parse_args(argv)
     if not args.command:
