@@ -6,10 +6,8 @@
 control layer that decides whether an AI agent run, version, or release is safe
 enough for production.
 
-OctoBus is the agent gateway. agent-prod is the agent quality layer. If OctoBus
-is "nginx for agents", agent-prod is "SonarQube for agents": it checks the
-behavior, trace, cost, release state, audit context, answer quality, and
-execution consistency before production traffic sees the agent.
+It checks the behavior, trace, cost, release state, audit context, answer
+quality, and execution consistency before production traffic sees the agent.
 
 Kubernetes' moat is not one scheduler implementation; it is the CRI/CNI/CSI
 interface design. agent-prod's moat is the quality-gate interface: Gate ABCs,
@@ -113,7 +111,6 @@ For a 15-second terminal recording script, see [docs/DEMO.md](docs/DEMO.md).
 | Project type | What it does | Where agent-prod fits |
 |---|---|---|
 | LangChain / CrewAI / AutoGen | Build and orchestrate agents | Controls production risk after agents are built |
-| OctoBus | Exposes services to agents through a gateway | Complements it with behavior and release quality gates |
 | Eval frameworks | Run offline tests | Gates live runs, versions, regressions, and rollouts |
 | Observability tools | Monitor what happened | Approves, rejects, rolls back, and generates feedback |
 
