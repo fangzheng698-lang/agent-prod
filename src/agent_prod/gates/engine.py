@@ -135,6 +135,25 @@ def _log_pipeline(improvement_id: str, status: str, gates_passed: int,
 DEFAULT_CONFIG_PATH = Path(__file__).parent / "config.yaml"
 
 
+def _expand_env_vars(value: object) -> object:
+    """Recursively expand ${VAR:-default} patterns in all string values."""
+    import os
+    import re
+    pattern = re.compile(r"\$\{([^:-]+)(?::-([^}]*))?\}")
+
+    if isinstance(value, str):
+        def _repl(m: re.Match) -> str:
+            var = m.group(1)
+            default = m.group(2) or ""
+            return os.environ.get(var, default)
+        return pattern.sub(_repl, value)
+    if isinstance(value, dict):
+        return {k: _expand_env_vars(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_expand_env_vars(v) for v in value]
+    return value
+
+
 def load_config(config_path: str | Path | None = None) -> dict:
     """加载 YAML 配置，不存在时返回空字典"""
     path = Path(config_path) if config_path else DEFAULT_CONFIG_PATH
@@ -143,6 +162,7 @@ def load_config(config_path: str | Path | None = None) -> dict:
         return {}
     with open(path) as f:
         config = yaml.safe_load(f) or {}
+    config = _expand_env_vars(config)
     logger.info("Loaded config from %s", path)
     return config
 
@@ -318,6 +338,16 @@ class QualityGateEngine:
             repository=self.repository,
         )
 
+        # ── 飞轮引擎（执行日志） ────────────────────────
+        self._flywheel = None
+        flywheel_log = self.config.get("flywheel", {}).get("log_path") if self.config else None
+        if flywheel_log:
+            try:
+                from agent_prod.adaptivity.data_flywheel import FlywheelEngine
+                self._flywheel = FlywheelEngine(flywheel_log)
+            except Exception:
+                pass
+
         # ── Gate1 熔断降级 ─────────────────────────────
         gates_cfg = self.config.get("gates", {}) if self.config else {}
         gate1_cfg = gates_cfg.get("gate1", {})
@@ -351,6 +381,31 @@ class QualityGateEngine:
             config=config,
             gate_timeout_seconds=gate_timeout,
             alert_dispatcher=dispatcher,
+        )
+
+    def _get_prompt_summary(self, improvement: Improvement) -> str:
+        return (improvement.candidate_output or {}).get("final_response", "")[:200]
+
+    def _get_turns(self, improvement: Improvement) -> int:
+        cd = improvement.candidate_output or {}
+        return len(cd.get("tools_used", []))
+
+    def _get_tokens(self, improvement: Improvement) -> int:
+        return improvement.actual_tokens
+
+    def _write_flywheel_log(self, improvement: Improvement, duration_ms: float, passed: bool) -> None:
+        if self._flywheel is None:
+            return
+        self._flywheel.log_execution(
+            run_id=improvement.id,
+            session_id=improvement.metadata.get("session_id", improvement.id),
+            prompt=self._get_prompt_summary(improvement),
+            response=improvement.candidate_output.get("final_response", "")[:200] if improvement.candidate_output else "",
+            turns=self._get_turns(improvement),
+            tokens=self._get_tokens(improvement),
+            duration_ms=duration_ms,
+            gate_pass=passed,
+            gate_status="production" if passed else "rejected",
         )
 
     def _run_with_timeout(self, gate_name: str, verify_fn, improvement: Improvement,
@@ -605,6 +660,13 @@ class QualityGateEngine:
                     _gates_passed_gauge.set(gates_passed)
                     _degraded_gauge.set(1 if self._gate1_is_degraded() else 0)
 
+                # ── 飞轮执行日志写入 ──
+                try:
+                    self._write_flywheel_log(improvement, total_ms, False)
+                except Exception as e:
+                    logger.warning("Flywheel log write failed: %s", e)
+                    _degraded_gauge.set(1 if self._gate1_is_degraded() else 0)
+
                 # ── 自动修复提示 ──────────────────────
                 if self.config and self.config.get("gates", {}).get("auto_fix", {}).get("enabled"):
                     _generate_fix_prompt(improvement)
@@ -646,6 +708,13 @@ class QualityGateEngine:
             _pipeline_duration.observe(total_ms)
             _gates_passed_gauge.set(gates_passed)
             _degraded_gauge.set(1 if self._gate1_is_degraded() else 0)
+
+        # ── 飞轮执行日志写入 ────────────────────────
+        try:
+            self._write_flywheel_log(improvement, total_ms, True)
+        except Exception as e:
+            logger.warning("Flywheel log write failed: %s", e)
+
         return improvement
 
     def run_gate(self, improvement: Improvement, gate_name: GateName,

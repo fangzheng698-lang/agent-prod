@@ -130,6 +130,8 @@ gates:
       long-running-agent:
         mode: enforce
   mode: memory
+flywheel:
+  log_path: ${PROJECT_ROOT:-.}/data/execution_log.jsonl
 logging:
   format: json
   level: INFO
@@ -153,7 +155,7 @@ sandbox:
   - /var/tmp/
 storage:
   backend: file  # memory | file | postgres
-  file_path: /Users/qz/Desktop/agent-prod/data/improvements.json
+  file_path: ${PROJECT_ROOT:-.}/data/improvements.json
   postgres:
     dsn: postgresql://quality_gates:quality_gates_dev@localhost:5432/quality_gates
     pool_size: 5
