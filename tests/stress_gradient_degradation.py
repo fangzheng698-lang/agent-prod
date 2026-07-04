@@ -38,6 +38,17 @@ import yaml
 
 from agent_prod import trace
 
+# ── yaml compatibility shim (venv may have an incomplete yaml) ──
+try:
+    yaml_safe_load = yaml.safe_load
+    yaml_dump = yaml.dump
+except AttributeError:
+    import json
+    def yaml_safe_load(s: str) -> dict:
+        return json.loads(s) if s else {}
+    def yaml_dump(data, **kwargs) -> str:
+        return json.dumps(data, indent=2, ensure_ascii=False)
+
 # ── 路径 ──
 CONFIG_PATH = Path(__file__).resolve().parent.parent / "src" / "agent_prod" / "gates" / "config.yaml"
 DOTENV_PATH = Path(__file__).resolve().parent.parent / ".env"
@@ -288,10 +299,10 @@ def get_gate6_details(result: dict) -> dict | None:
 # ═══════════════════════════════════════════════════════════════════
 
 def ensure_config():
-    config = yaml.safe_load(CONFIG_PATH.read_text()) or {}
+    config = yaml_safe_load(CONFIG_PATH.read_text()) or {}
     backup_path = CONFIG_PATH.with_suffix(".yaml.bak")
     if not backup_path.exists():
-        backup_path.write_text(yaml.dump(config, default_flow_style=False, allow_unicode=True))
+        backup_path.write_text(yaml_dump(config, default_flow_style=False, allow_unicode=True))
 
     config.setdefault("storage", {})["backend"] = "file"
     config["storage"]["file_path"] = str(
@@ -322,7 +333,7 @@ def ensure_config():
     gate6["enabled"] = True
     gate6["evaluator"] = "checklist"
 
-    CONFIG_PATH.write_text(yaml.dump(config, default_flow_style=False, allow_unicode=True))
+    CONFIG_PATH.write_text(yaml_dump(config, default_flow_style=False, allow_unicode=True))
     print(f"  Config: storage=file, Gate3 baseline_min=1, Gate6 api_key={'present' if dotenv_key else 'MISSING'}")
     return dotenv_key is not None
 
@@ -334,38 +345,49 @@ def restore_config():
         backup_path.unlink()
 
 
+AGENT_PROD_URL = os.environ.get("AGENT_PROD_URL", "http://localhost:8765")
+
+
 def ensure_server():
+    # Use existing server — verify it's healthy
     try:
-        pid_str = subprocess.run(
-            ["lsof", "-ti", ":8000"], capture_output=True, text=True
-        ).stdout.strip()
-        if pid_str:
-            for pid in pid_str.split():
-                os.kill(int(pid), signal.SIGTERM)
-            time.sleep(2)
-    except Exception:
-        pass
+        import urllib.request
+        req = urllib.request.Request(f"{AGENT_PROD_URL}/health")
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read())
+            print(f"  Server OK: {data.get('status')}")
+    except Exception as e:
+        print(f"  {RED}No server at {AGENT_PROD_URL}: {e}{RESET}")
+        print(f"  Starting server...")
+        env = os.environ.copy()
+        env["QUALITY_GATES_MODE"] = "production"
+        if DOTENV_PATH.exists():
+            for line in DOTENV_PATH.read_text().splitlines():
+                if "=" in line:
+                    k, v = line.split("=", 1)
+                    env[k.strip()] = v.strip().strip("\"'")
+        proc = subprocess.Popen(
+            [sys.executable, "-m", "agent_prod", "serve", "--port", "8765"],
+            env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        print(f"  Started server (PID {proc.pid})")
+        time.sleep(4)
+        try:
+            with urllib.request.urlopen(f"{AGENT_PROD_URL}/health", timeout=5) as resp:
+                data = json.loads(resp.read())
+                print(f"  {GREEN}Health: {data.get('status')}{RESET}")
+        except Exception as e2:
+            print(f"  {RED}Server failed: {e2}{RESET}")
+            sys.exit(1)
+        return proc
 
-    env = os.environ.copy()
-    env["QUALITY_GATES_MODE"] = "production"
-    if DOTENV_PATH.exists():
-        for line in DOTENV_PATH.read_text().splitlines():
-            if "=" in line:
-                k, v = line.split("=", 1)
-                env[k.strip()] = v.strip().strip("\"'")
-
-    proc = subprocess.Popen(
-        [sys.executable, "-m", "agent_prod", "serve", "--port", "8000"],
-        env=env,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    print(f"  Started server (PID {proc.pid})")
-    time.sleep(4)
+    return None
 
     try:
         import urllib.request
-        req = urllib.request.Request("http://localhost:8000/health", headers={"Accept": "application/json"})
+        req = urllib_request.Request(f"{AGENT_PROD_URL}/health", headers={"Accept": "application/json"})
         with urllib.request.urlopen(req, timeout=5) as resp:
             data = json.loads(resp.read())
             print(f"  {GREEN}Health: {data.get('status')}{RESET}")
@@ -409,6 +431,8 @@ def build_decisions(p: dict) -> list[dict]:
 # ═══════════════════════════════════════════════════════════════════
 
 def main():
+    os.environ["AGENT_PROD_URL"] = AGENT_PROD_URL
+
     print("=" * 70)
     print(f"  {BOLD}渐进式偏离压力测试{RESET}")
     print(f"  Gradient Degradation Stress Test — 30 Rounds")
@@ -478,6 +502,7 @@ def main():
                 budget_tokens=50000,
                 budget_time_ms=300000,
                 metadata={"expected_plan": EXPECTED_PLAN, "round": p["num"]},
+                timeout=30.0,
             )
 
             match, detail = round_match(p, result)
@@ -675,7 +700,7 @@ def main():
         print()
 
     finally:
-        print(f"{BOLD}[清理] 恢复配置 + 停止 server{RESET}")
+        print(f"{BOLD}[清理] 恢复配置{RESET}")
         print("-" * 40)
         restore_config()
         if server_proc and server_proc.poll() is None:
