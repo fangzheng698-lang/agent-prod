@@ -312,6 +312,16 @@ class QualityGateEngine:
         except Exception:
             pass  # 沙箱配置加载失败不阻断引擎启动
 
+        # ── 飞轮引擎（执行日志）必须在 gate3 之前初始化 ──
+        self._flywheel = None
+        flywheel_log = self.config.get("flywheel", {}).get("log_path") if self.config else None
+        if flywheel_log:
+            try:
+                from agent_prod.adaptivity.data_flywheel import FlywheelEngine
+                self._flywheel = FlywheelEngine(flywheel_log)
+            except Exception:
+                pass
+
         # 初始化各门
         self._auth_store = AuthGrantStore()
         self.gate0 = Gate0Permission.from_yaml(self.config, self._auth_store)
@@ -321,7 +331,8 @@ class QualityGateEngine:
         self.gate3 = Gate3Regression(
             config=gate3_config or Gate3Config.from_yaml(self.config),
             raw_config=self.config if self.config else None,
-            repository=self.repository,  # 使用已实例化的 repo，不是参数（可能为None）
+            repository=self.repository,
+            flywheel_engine=self._flywheel,
         )
         self.gate4 = Gate4GrayRelease(
             config=gate4_config or Gate4Config.from_yaml(self.config),
@@ -337,16 +348,6 @@ class QualityGateEngine:
             raw_config=self.config,
             repository=self.repository,
         )
-
-        # ── 飞轮引擎（执行日志） ────────────────────────
-        self._flywheel = None
-        flywheel_log = self.config.get("flywheel", {}).get("log_path") if self.config else None
-        if flywheel_log:
-            try:
-                from agent_prod.adaptivity.data_flywheel import FlywheelEngine
-                self._flywheel = FlywheelEngine(flywheel_log)
-            except Exception:
-                pass
 
         # ── Gate1 熔断降级 ─────────────────────────────
         gates_cfg = self.config.get("gates", {}) if self.config else {}

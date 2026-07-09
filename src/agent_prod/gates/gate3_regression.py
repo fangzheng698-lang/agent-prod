@@ -69,14 +69,17 @@ class Gate3Config(BaseModel):
 
 
 class Gate3Regression:
-    """回归验证门 — DeepDiff 结构化对比 + 动态基线"""
+    """回归验证门 — DeepDiff 结构化对比 + 动态基线 + 自适应阈值"""
 
     def __init__(self, config: Gate3Config | None = None,
                  raw_config: dict | None = None,
-                 repository=None):
+                 repository=None,
+                 flywheel_engine=None):
         self.config = config or Gate3Config()
         self._raw_config = raw_config
         self._repo = repository
+        self._flywheel = flywheel_engine
+        self._adaptive_engine = None
 
     def _resolve_config(self, improvement: Improvement) -> Gate3Config:
         """Resolve per-agent thresholds if agent metadata is present."""
@@ -104,6 +107,11 @@ class Gate3Regression:
                 improvement.metadata["gate3_baseline_samples"] = baseline_samples
 
         if not improvement.baseline_output:
+            # 即使没有基线，自适应阈值也在 fallback 中基于历史数据做检查
+            if self._flywheel:
+                agent_type = improvement.metadata.get("agent", "")
+                if agent_type:
+                    return self._verify_fallback(improvement, start, cfg)
             return GateResult(
                 gate_name=GateName.GATE3,
                 passed=True,
@@ -322,9 +330,14 @@ class Gate3Regression:
 
     def _verify_fallback(self, improvement: Improvement, start: float,
                          cfg: Gate3Config) -> GateResult:
-        """降级方案：数值指标对比（零依赖）"""
+        """降级方案：数值指标对比（零依赖）+ 自适应阈值"""
         baseline, candidate = improvement.baseline_output, improvement.candidate_output
         regressions: list[Regression] = []
+
+        # ── 自适应阈值检查 ─────────────────────────────────
+        adaptive_result = self._adaptive_verify(improvement, cfg)
+        if adaptive_result:
+            regressions.extend(adaptive_result)
 
         for key in baseline:
             # 跳过内部元数据字段（_evolved_from, _evolved_at, _decisions 等）
@@ -352,13 +365,16 @@ class Gate3Regression:
                         severity="critical",
                     ))
 
-        passed = len(regressions) == 0
+        critical = [r for r in regressions if r.severity == "critical"]
+        passed = len(critical) == 0
         return GateResult(
             gate_name=GateName.GATE3,
             passed=passed,
             reason="No regressions (manual compare)" if passed
-                   else "; ".join(f"{r.field}: {r.change_type}" for r in regressions[:5]),
+                   else "; ".join(f"{r.field}: {r.change_type}" for r in critical[:5]),
             details={"regressions": [r.model_dump() for r in regressions],
+                     "critical_count": len(critical),
+                     "warning_count": len(regressions) - len(critical),
                      "source": improvement.metadata.pop("gate3_baseline_source", "manual"),
                      "samples": improvement.metadata.pop("gate3_baseline_samples", 0)},
             duration_ms=(time.time() - start) * 1000,
@@ -394,6 +410,88 @@ class Gate3Regression:
                 severity="warning",
             )]
         return []
+
+    def _train_adaptive_engine(self, agent_type: str) -> None:
+        """从 flywheel 历史数据训练自适应阈值引擎。
+
+        喂入同 agent 的历史 latency / success_rate / token_efficiency，
+        校准 EWMA 动态阈值带。
+        """
+        if not self._flywheel:
+            return
+        try:
+            logs = self._flywheel._load_logs(limit=200)
+        except Exception:
+            return
+        if not logs:
+            return
+
+        same_agent = [r for r in logs if r.session_id and agent_type in r.session_id]
+        # 也匹配 agent 字段（如果 ExecutionLogRecord 有该字段）
+        if len(same_agent) < 3:
+            same_agent = [r for r in logs if getattr(r, 'agent', '') == agent_type]
+        # 最后兜底：用全部非零数据
+        if len(same_agent) < 3:
+            same_agent = [r for r in logs if r.duration_ms > 0 and r.turns > 0]
+        if len(same_agent) < 3:
+            return
+
+        from agent_prod.adaptivity.adaptive_gates import AdaptiveGateEngine
+        self._adaptive_engine = AdaptiveGateEngine(
+            gate_name="gate3",
+            metrics=["latency_ms", "success_rate", "token_efficiency"],
+            window_size=50, sigma_mult=3.0, min_samples=5,
+        )
+
+        for r in same_agent:
+            dur = r.duration_ms
+            tokens = (r.costs or {}).get("prompt_tokens", 0) + (r.costs or {}).get("completion_tokens", 0)
+            qg = r.quality_gate_result or {}
+            if dur > 0:
+                self._adaptive_engine.record_metric("latency_ms", dur)
+            if tokens > 0:
+                self._adaptive_engine.record_metric("token_efficiency", tokens)
+            if qg.get("passed") is not None:
+                self._adaptive_engine.record_metric("success_rate", 1.0 if qg.get("passed") else 0.0)
+
+        self._adaptive_engine.calibrate_all()
+
+    def _adaptive_verify(self, improvement: Improvement, cfg: Gate3Config) -> list[Regression]:
+        """用自适应阈值引擎检查指标，返回回归列表。"""
+        agent_type = improvement.metadata.get("agent", "")
+        if not agent_type:
+            return []
+
+        # 训练（首次调用或数据不足时）
+        if self._adaptive_engine is None:
+            self._train_adaptive_engine(agent_type)
+
+        if self._adaptive_engine is None:
+            return []
+
+        candidate = improvement.candidate_output or {}
+        metrics = {}
+        for key in ("latency_p95_ms", "latency_ms", "success_rate", "token_efficiency"):
+            v = candidate.get(key, 0)
+            if isinstance(v, (int, float)) and v > 0:
+                m_key = "latency_ms" if key in ("latency_p95_ms", "latency_ms") else key
+                metrics[m_key] = float(v)
+
+        if not metrics:
+            return []
+
+        result = self._adaptive_engine.evaluate(metrics)
+        regressions = []
+        has_manual_baseline = bool(improvement.baseline_output)
+        for v in result.get("violations", []):
+            regressions.append(Regression(
+                field=f"adaptive_{v['metric']}",
+                old_value=v.get("upper", 0),
+                new_value=v["value"],
+                change_type=f"adaptive σ={v.get('deviation',0):.1f} (upper={v.get('upper',0):.0f})",
+                severity="warning" if not has_manual_baseline else "critical",
+            ))
+        return regressions
 
     @staticmethod
     def rollback(improvement: Improvement) -> None:
