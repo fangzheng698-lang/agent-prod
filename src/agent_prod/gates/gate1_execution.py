@@ -35,7 +35,7 @@ class ExecutionOutput(BaseModel, strict=False):
     final_response: str = Field(min_length=1, max_length=100_000)
     confidence: float = Field(ge=0.0, le=1.0, default=0.95)
     tools_used: list[str] = Field(max_length=50, default_factory=list)
-    token_count: int = Field(ge=0, lt=1_000_000, default=0)
+    token_count: int = Field(ge=0, lt=10_000_000, default=0)  # 上限由 budget 控制，schema 只做合理性检查
     warnings: list[str] = Field(default_factory=list, max_length=20)
 
     @field_validator("final_response")

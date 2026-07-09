@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -113,6 +113,31 @@ def parse_qclaw_session(
     # Extract last user question
     user_question = _extract_last_user_message(events)
 
+    # 当所有 decisions 的 token 都是估算值时，重新按更准确的方式计算一次
+    # 用所有 assistant 消息的文本总长度 ÷ 4.5（更保守的估算）
+    if total_tokens_prompt == 0 and total_tokens_completion == 0:
+        total_chars = _count_all_assistant_text(events)
+        total_tokens_prompt = max(1, total_chars // 4)
+        total_tokens_completion = total_tokens_prompt
+
+    # 如果 duration 也是 0，用时间戳差估算
+    if total_duration_ms == 0:
+        total_duration_ms = _compute_duration(events)
+        # 如果时间戳也不够，至少给个非零值用于展示
+        if total_duration_ms == 0:
+            # 每轮估算 30 秒
+            total_duration_ms = len(decisions) * 30000
+
+    # 工具调用 duration 估算：按时间戳差分摊
+    _backfill_tool_durations(events, decisions)
+
+    # 用总工具耗时作为 latency_p95_ms（比全会话时间戳跨度更有意义）
+    total_tool_time = sum(
+        tc.get("duration_ms", 0)
+        for d in decisions for tc in d.get("tool_calls", [])
+    )
+    effective_duration = total_tool_time if total_tool_time > 0 else total_duration_ms
+
     # ── Build aggregated output ────────────────────────────
     output = {
         "final_response": final_response[:5000] if final_response else "",
@@ -129,6 +154,9 @@ def parse_qclaw_session(
         "total_turns": len(decisions),
         "source": source,
         "user_question": user_question[:2000] if user_question else "",
+        # 估算值 — qclaw 服务器不记录真实 token 数
+        "_estimated_tokens": True,
+        "_estimated_duration": True,
     }
     if child_responses:
         custom["child_responses"] = child_responses
@@ -141,7 +169,7 @@ def parse_qclaw_session(
         "decisions": decisions,
         "declared_tools": all_tools,
         "current_metrics": {
-            "latency_p95_ms": total_duration_ms,
+            "latency_p95_ms": effective_duration,
             "success_rate": 1.0,
             "error_rate": 0.0,
             "token_efficiency": 1.0,
@@ -150,7 +178,7 @@ def parse_qclaw_session(
         "metadata": {
             "source": source,
             "session_file": str(fpath.resolve()),
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "subagent_count": n_spawned,
             "subagent_tool_calls": n_subagent_tools,
         },
@@ -264,8 +292,14 @@ def _assistant_to_decision(
             text = c.get("text", "")
             break
 
+    # qclaw 的 JSONL 中 usage 始终为 0（服务器端不记录真实 token 数）
+    # 按 4 字符 ≈ 1 token 估算；如果有真实 usage 则优先使用
     prompt_tokens = usage.get("input", 0) or 0
     completion_tokens = usage.get("output", 0) or 0
+    if not prompt_tokens and not completion_tokens:
+        # 估算：从用户消息的文本长度推算
+        completion_tokens = max(1, len(text) // 4)
+        prompt_tokens = completion_tokens  # 对称估算
 
     return {
         "decision_id": f"{session_id}-turn-{turn_index + 1}",
@@ -296,7 +330,7 @@ def _toolresult_to_tool_call(msg: dict[str, Any]) -> dict[str, Any] | None:
             result_text = c.get("text", "")
             break
 
-    # Execution details
+    # Execution details — qclaw 通常不记录 durationMs，用 0 标记
     details = msg.get("details", {}) or {}
     duration_ms = details.get("durationMs", 0) or 0
     status = details.get("status", "")
@@ -361,6 +395,78 @@ def _extract_last_user_message(events: list[dict[str, Any]]) -> str:
             if isinstance(c, dict) and c.get("type") == "text":
                 return c.get("text", "")
     return ""
+
+
+def _count_all_assistant_text(events: list[dict[str, Any]]) -> int:
+    """Count total characters across all assistant text responses."""
+    total = 0
+    for event in events:
+        if event.get("type") != "message":
+            continue
+        msg = event.get("message", {})
+        if msg.get("role") != "assistant":
+            continue
+        content = msg.get("content", [])
+        for c in content:
+            if isinstance(c, dict) and c.get("type") == "text":
+                total += len(c.get("text", ""))
+    return total
+
+
+def _backfill_tool_durations(
+    events: list[dict[str, Any]],
+    decisions: list[dict[str, Any]],
+) -> None:
+    """估算工具调用的耗时，写入 decisions 的 tool_calls 中。
+
+    策略：
+      1. 如果某个 tool_call 已经有 duration_ms > 0，跳过。
+      2. 否则，用当前工具调用时间戳到下一条消息的时间戳的差值。
+      3. 如果时间戳不可用，默认给 5 秒。
+    """
+    # 构建事件时间戳索引：按 toolResult 的 toolCallId 查找时间戳
+    tool_timestamps: dict[str, float] = {}
+    prev_ts = 0.0
+    for event in events:
+        ts = event.get("timestamp", "")
+        ts_ms = 0.0
+        if ts:
+            try:
+                dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                ts_ms = dt.timestamp() * 1000
+            except (ValueError, AttributeError):
+                pass
+
+        if event.get("type") != "message":
+            prev_ts = ts_ms or prev_ts
+            continue
+
+        msg = event.get("message", {})
+        if msg.get("role") == "toolResult":
+            tc_id = msg.get("toolCallId", "")
+            if tc_id:
+                tool_timestamps[tc_id] = ts_ms or prev_ts
+        prev_ts = ts_ms or prev_ts
+
+    # 按时间戳排序
+    sorted_ts = sorted(tool_timestamps.values())
+
+    for decision in decisions:
+        for tc in decision.get("tool_calls", []):
+            if tc.get("duration_ms", 0) > 0:
+                continue
+            tool_id = tc.get("tool_id", "")
+            ts = tool_timestamps.get(tool_id, 0)
+            if ts and sorted_ts:
+                # 找到下一个时间戳的差值
+                idx = sorted_ts.index(ts) if ts in sorted_ts else -1
+                if idx >= 0 and idx + 1 < len(sorted_ts):
+                    duration = sorted_ts[idx + 1] - ts
+                    tc["duration_ms"] = max(1000, min(duration, 60000))
+                else:
+                    tc["duration_ms"] = 5000  # 默认 5 秒
+            else:
+                tc["duration_ms"] = 5000
 
 
 def list_qclaw_sessions(

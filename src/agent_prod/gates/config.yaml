@@ -72,6 +72,9 @@ gates:
       opencode:
         time_budget_ms: 600000
         token_budget: 15000
+      qclaw:
+        time_budget_ms: 3600000
+        token_budget: 2000000
     circuit_breaker_cooldown_seconds: 60.0
     consecutive_failures_before_escalation: 3
     execution_time_tolerance: 1.2
