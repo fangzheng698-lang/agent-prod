@@ -994,6 +994,118 @@ async def agent_stats(agent: str = "", limit: int = 100):
 
 
 # ═══════════════════════════════════════════════════════════
+#  Tool Usage endpoint
+# ═══════════════════════════════════════════════════════════
+
+@app.get("/v1/agent/tools")
+async def agent_tools(agent: str = "", limit: int = 10):
+    """查看智能体的工具调用统计。
+
+    GET /v1/agent/tools              → 所有 agent 的工具统计
+    GET /v1/agent/tools?agent=qclaw  → 只看 qclaw
+    GET /v1/agent/tools?limit=5      → 只看 top 5
+
+    返回:
+    {
+      "tools": [
+        {"tool_name": "exec", "call_count": 306, "success_rate": 0.91,
+         "avg_duration_ms": 1400, "agents": ["qclaw"]},
+        ...
+      ],
+      "total_calls": 642,
+      "total_tools": 16,
+      "agent": "qclaw"
+    }
+    """
+    try:
+        # 从 flywheel 数据解析工具调用
+        from agent_prod.adaptivity.data_flywheel import FlywheelEngine
+        flywheel = FlywheelEngine(
+            log_path="/tmp/agent-prod/data/execution_log.jsonl"
+        )
+
+        # 收集工具统计
+        from collections import Counter, defaultdict
+        tool_counts: Counter = Counter()
+        tool_success: Counter = Counter()
+        tool_durations: dict[str, list[float]] = defaultdict(list)
+        tool_agents: dict[str, set[str]] = defaultdict(set)
+        session_ids: set[str] = set()
+
+        # 1. 从 execution_log 获取 session_id 列表
+        logs = flywheel._load_logs(limit=500)
+        for rec in logs:
+            sid = rec.session_id
+            if sid and sid not in session_ids:
+                session_ids.add(sid)
+
+        # 2. 尝试解析最近的 qclaw session 文件
+        import os
+        qclaw_dir = os.path.expanduser("~/.qclaw/agents/main/sessions")
+        session_files = []
+        if os.path.exists(qclaw_dir):
+            session_files = sorted(
+                [f for f in os.listdir(qclaw_dir)
+                 if f.endswith(".jsonl") and ".deleted." not in f
+                 and ".trajectory" not in f and f != "sessions.json"],
+                reverse=True,
+            )[:limit]
+
+        for sf in session_files:
+            fpath = os.path.join(qclaw_dir, sf)
+            try:
+                from agent_prod.integration.qclaw_parser import parse_qclaw_session
+                trace = parse_qclaw_session(fpath)
+                if not trace:
+                    continue
+                for d in trace.get("decisions", []):
+                    for tc in d.get("tool_calls", []):
+                        name = tc.get("tool_name", "unknown")
+                        tool_counts[name] += 1
+                        if tc.get("success", True):
+                            tool_success[name] += 1
+                        dur = tc.get("duration_ms", 0)
+                        if dur > 0:
+                            tool_durations[name].append(dur)
+                        tool_agents[name].add(trace.get("agent", "unknown"))
+            except Exception:
+                continue
+
+        # 3. 如果 agent 参数指定，过滤
+        target_agent = agent if agent else ""
+        tools_list = []
+        for name, count in tool_counts.most_common():
+            agents = sorted(tool_agents.get(name, []))
+            if target_agent and target_agent not in agents:
+                continue
+            success_rate = tool_success.get(name, 0) / count if count > 0 else 0
+            avg_dur = (
+                sum(tool_durations.get(name, []))
+                / len(tool_durations.get(name, []))
+                if tool_durations.get(name)
+                else 0
+            )
+            tools_list.append({
+                "tool_name": name,
+                "call_count": count,
+                "success_rate": round(success_rate, 2),
+                "avg_duration_ms": round(avg_dur, 0),
+                "agents": agents,
+            })
+
+        return {
+            "tools": tools_list[:limit] if limit > 0 else tools_list,
+            "total_calls": sum(tool_counts.values()),
+            "total_tools": len(tool_counts),
+            "agent": target_agent or "all",
+            "sessions_scanned": len(session_files),
+        }
+
+    except Exception as e:
+        raise HTTPException(500, f"Failed to query tool usage: {e}") from e
+
+
+# ═══════════════════════════════════════════════════════════
 #  Thresholds query endpoint
 # ═══════════════════════════════════════════════════════════
 

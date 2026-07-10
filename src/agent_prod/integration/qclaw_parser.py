@@ -335,7 +335,12 @@ def _toolresult_to_tool_call(msg: dict[str, Any]) -> dict[str, Any] | None:
     duration_ms = details.get("durationMs", 0) or 0
     status = details.get("status", "")
     exit_code = details.get("exitCode")
-    success = (status == "completed") and (exit_code is None or exit_code == 0)
+    # qclaw 的 JSONL 中 details 通常为 null，此时无法判断真实状态
+    # 如果 details 为 null/空，fallback：有结果文本就视为成功
+    if not details:
+        success = bool(result_text.strip())
+    else:
+        success = (status == "completed" or status == "success") and (exit_code is None or exit_code == 0)
 
     return {
         "tool_id": tool_call_id or f"tc-{tool_name}",
