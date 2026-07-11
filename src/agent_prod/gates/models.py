@@ -11,6 +11,24 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+# 延迟导入引用（在 Improvement 使用前设置）
+_reasoning_chain_cls = None
+_provenance_cls = None
+
+
+def _get_reasoning_chain():
+    global _reasoning_chain_cls
+    if _reasoning_chain_cls is None:
+        from .reasoning import ReasoningChain as _reasoning_chain_cls
+    return _reasoning_chain_cls
+
+
+def _get_provenance():
+    global _provenance_cls
+    if _provenance_cls is None:
+        from .provenance import DataProvenance as _provenance_cls
+    return _provenance_cls
+
 
 class ImprovementStatus(str, Enum):
     """改进项生命周期状态"""
@@ -108,11 +126,24 @@ class Improvement(BaseModel):
     human_approver: str = ""
     human_approved_at: datetime | None = None
 
+    # 推理链与数据溯源（Phase 1: 行业升级）
+    reasoning_chain: Any = None  # ReasoningChain, 延迟导入避免循环
+    data_provenance: Any = None  # DataProvenance, 延迟导入避免循环
+
     # Pydantic V2 序列化配置
     model_config = {"extra": "ignore", "ser_json_timedelta": "iso8601"}
 
     def mark_updated(self) -> None:
         self.updated_at = datetime.now(UTC)
+
+    def init_reasoning_chain(self) -> None:
+        """惰性初始化推理链和数据溯源"""
+        if self.reasoning_chain is None:
+            RC = _get_reasoning_chain()
+            self.reasoning_chain = RC(improvement_id=self.id)
+        if self.data_provenance is None:
+            DP = _get_provenance()
+            self.data_provenance = DP(improvement_id=self.id)
 
     def add_result(self, result: GateResult) -> None:
         self.gate_results.append(result)

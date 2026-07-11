@@ -7,12 +7,14 @@ from __future__ import annotations
 
 import logging
 import time
+import uuid
 from datetime import UTC, datetime
 from typing import Any
 
 from pydantic import BaseModel
 
 from .models import GateName, GateResult, Improvement, RollbackLevel, RollbackPlan
+from .reasoning import EvidenceSource, EvidenceType, ReasoningStep
 
 logger = logging.getLogger(__name__)
 
@@ -112,13 +114,15 @@ class Gate3Regression:
                 agent_type = improvement.metadata.get("agent", "")
                 if agent_type:
                     return self._verify_fallback(improvement, start, cfg)
-            return GateResult(
+            result = GateResult(
                 gate_name=GateName.GATE3,
                 passed=True,
                 reason="No baseline — first run, skipping regression",
                 details={"skipped": True, "source": "none"},
                 duration_ms=(time.time() - start) * 1000,
             )
+            self._inject_reasoning(improvement, result, "skipped", cfg)
+            return result
 
         if _DEEPDIFF_AVAILABLE:
             return self._verify_deepdiff(improvement, start, cfg)
@@ -315,7 +319,7 @@ class Gate3Regression:
             }
             improvement.metadata["attribution_fix_prompt"] = attribution.fix_prompt
 
-        return GateResult(
+        result = GateResult(
             gate_name=GateName.GATE3,
             passed=passed,
             reason=(
@@ -327,6 +331,51 @@ class Gate3Regression:
             details=details,
             duration_ms=(time.time() - start) * 1000,
         )
+        self._inject_reasoning(improvement, result, "deepdiff", cfg, regressions=regressions)
+        return result
+
+    def _inject_reasoning(
+        self,
+        improvement: Improvement,
+        result: GateResult,
+        method: str,
+        cfg: Gate3Config,
+        regressions: list | None = None,
+    ) -> None:
+        """向推理链追加 Gate3 决策记录"""
+        improvement.init_reasoning_chain()
+        r = regressions or []
+        evidence = [
+            EvidenceSource(
+                type=EvidenceType.COMPARISON,
+                name=f"regression_{method}",
+                value={
+                    "critical": sum(1 for x in r if x.severity == "critical"),
+                    "warning": sum(1 for x in r if x.severity == "warning"),
+                    "total": len(r),
+                    "method": method,
+                },
+                confidence=0.95,
+            ),
+        ]
+        if r:
+            top = r[:3]
+            evidence.append(EvidenceSource(
+                type=EvidenceType.STATISTICAL,
+                name="top_regressions",
+                value=[{"field": x.field, "change": x.change_type, "severity": x.severity} for x in top],
+                confidence=0.9,
+            ))
+
+        step = ReasoningStep(
+            step_id=f"g3-{uuid.uuid4().hex[:8]}",
+            gate="gate3",
+            decision="PASS" if result.passed else "FAIL",
+            reason=result.reason,
+            evidence=evidence,
+            confidence=0.9 if result.passed else 0.95,
+        )
+        improvement.reasoning_chain.add_step(step)
 
     def _verify_fallback(self, improvement: Improvement, start: float,
                          cfg: Gate3Config) -> GateResult:
@@ -367,7 +416,7 @@ class Gate3Regression:
 
         critical = [r for r in regressions if r.severity == "critical"]
         passed = len(critical) == 0
-        return GateResult(
+        result = GateResult(
             gate_name=GateName.GATE3,
             passed=passed,
             reason="No regressions (manual compare)" if passed
@@ -379,6 +428,8 @@ class Gate3Regression:
                      "samples": improvement.metadata.pop("gate3_baseline_samples", 0)},
             duration_ms=(time.time() - start) * 1000,
         )
+        self._inject_reasoning(improvement, result, "fallback", cfg, regressions=regressions)
+        return result
 
     def _check_metric_degradation(self, key: str, imp: Improvement,
                                   cfg: Gate3Config, min_baseline: float = 0.0) -> list[Regression]:

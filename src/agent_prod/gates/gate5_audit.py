@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import os
 import time
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -22,6 +23,7 @@ from .models import (
     RollbackLevel,
     RollbackPlan,
 )
+from .reasoning import EvidenceSource, EvidenceType, ReasoningStep
 
 logger = logging.getLogger(__name__)
 
@@ -270,13 +272,15 @@ class Gate5ReleaseAudit:
             results, all_pass = self.engine.evaluate(improvement)
         except Exception as e:
             logger.exception("Gate5 PolicyEngine evaluation failed")
-            return GateResult(
+            result = GateResult(
                 gate_name=GateName.GATE5,
                 passed=False,
                 reason=f"Policy engine error: {e}",
                 details={"error": str(e)},
                 duration_ms=(time.time() - start) * 1000,
             )
+            self._inject_reasoning(improvement, result, [])
+            return result
 
         # ── observe 模式降级 ──────────────────────────────
         if self.config.is_observe:
@@ -300,7 +304,7 @@ class Gate5ReleaseAudit:
         critical = [r for r in results if r.severity == "critical" and not r.passed]
         warnings = [r for r in results if r.severity == "warning" and not r.passed]
 
-        return GateResult(
+        result = GateResult(
             gate_name=GateName.GATE5,
             passed=all_pass,
             reason=(
@@ -317,6 +321,48 @@ class Gate5ReleaseAudit:
             },
             duration_ms=(time.time() - start) * 1000,
         )
+        self._inject_reasoning(improvement, result, results)
+        return result
+
+    @staticmethod
+    def _inject_reasoning(
+        improvement: Improvement,
+        result: GateResult,
+        rules: list[PolicyRule],
+    ) -> None:
+        """向推理链追加 Gate5 决策记录"""
+        improvement.init_reasoning_chain()
+        evidence = [
+            EvidenceSource(
+                type=EvidenceType.POLICY_RULE,
+                name="policy_evaluation",
+                value={
+                    "total_rules": len(rules),
+                    "passed": sum(1 for r in rules if r.passed),
+                    "failed": sum(1 for r in rules if not r.passed),
+                    "critical": sum(1 for r in rules if r.severity == "critical" and not r.passed),
+                },
+                confidence=0.99,
+            ),
+        ]
+        for r in rules:
+            if not r.passed:
+                evidence.append(EvidenceSource(
+                    type=EvidenceType.POLICY_RULE,
+                    name=r.name,
+                    value={"severity": r.severity, "reason": r.reason},
+                    confidence=0.99,
+                ))
+
+        step = ReasoningStep(
+            step_id=f"g5-{uuid.uuid4().hex[:8]}",
+            gate="gate5",
+            decision="PASS" if result.passed else "FAIL",
+            reason=result.reason,
+            evidence=evidence,
+            confidence=0.98,
+        )
+        improvement.reasoning_chain.add_step(step)
 
     @staticmethod
     def rollback(improvement: Improvement) -> None:

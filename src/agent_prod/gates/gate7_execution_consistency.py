@@ -17,10 +17,12 @@ from __future__ import annotations
 import json
 import logging
 import time
+import uuid
 from typing import Any
 
 from .interface import register_gate
 from .models import GateName, GateResult, Improvement, RollbackLevel, RollbackPlan
+from .reasoning import EvidenceSource, EvidenceType, ReasoningStep
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +32,40 @@ try:
 except ImportError:
     _DEEPDIFF_AVAILABLE = False
     DeepDiff = None  # type: ignore
+
+
+def apply_gate7_reasoning(improvement, result, deviations, mode):
+    """向推理链追加 Gate7 决策记录"""
+    improvement.init_reasoning_chain()
+    evidence = [
+        EvidenceSource(
+            type=EvidenceType.PATTERN_MATCH,
+            name="plan_consistency",
+            value={
+                "total_deviations": len(deviations),
+                "critical": sum(1 for d in deviations if d.get("severity") == "critical"),
+                "warning": sum(1 for d in deviations if d.get("severity") == "warning"),
+                "mode": mode,
+            },
+            confidence=0.9,
+        ),
+    ]
+    for d in deviations[:3]:
+        evidence.append(EvidenceSource(
+            type=EvidenceType.PATTERN_MATCH,
+            name=d.get("type", "deviation"),
+            value={"detail": d.get("detail", "")[:200]},
+            confidence=0.85,
+        ))
+    step = ReasoningStep(
+        step_id=f"g7-{uuid.uuid4().hex[:8]}",
+        gate="gate7",
+        decision="PASS" if result.passed else "FAIL",
+        reason=result.reason,
+        evidence=evidence,
+        confidence=0.9,
+    )
+    improvement.reasoning_chain.add_step(step)
 
 
 class Gate7ExecutionConsistency:
@@ -74,13 +110,15 @@ class Gate7ExecutionConsistency:
 
         # 如果没有 expected_plan，跳过（不是被分配任务的情况）
         if not expected_plan:
-            return GateResult(
+            result = GateResult(
                 gate_name=GateName.GATE7,
                 passed=True,
                 reason="No expected_plan — skipping plan consistency check",
                 details={"skipped": True, "reason": "no_expected_plan"},
                 duration_ms=(time.time() - start) * 1000,
             )
+            apply_gate7_reasoning(improvement, result, [], mode="observe")
+            return result
 
         deviations = []
 
@@ -143,13 +181,15 @@ class Gate7ExecutionConsistency:
         if not reason_parts:
             reason_parts.append("Executed as planned")
 
-        return GateResult(
+        result = GateResult(
             gate_name=GateName.GATE7,
             passed=passed,
             reason="; ".join(reason_parts),
             details=details,
             duration_ms=(time.time() - start) * 1000,
         )
+        apply_gate7_reasoning(improvement, result, deviations, mode=mode)
+        return result
 
     def _compare_plan_vs_response(self, plan: str, response: str) -> list[dict]:
         """对计划 vs 回复做简单文本级对比。

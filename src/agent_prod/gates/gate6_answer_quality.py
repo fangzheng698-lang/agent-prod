@@ -24,11 +24,13 @@ import json
 import logging
 import os
 import time
+import uuid
 from dataclasses import dataclass, field
 from typing import Any
 from urllib import request
 
 from .models import GateName, GateResult, Improvement
+from .reasoning import EvidenceSource, EvidenceType, ReasoningStep
 
 logger = logging.getLogger(__name__)
 
@@ -266,7 +268,7 @@ class Gate6AnswerQuality:
                     "candidate_len": len(candidate),
                     "expected_len": len(expected),
                 }
-                return self._make_result(score, start, details)
+                return self._make_result(score, start, details, improvement=improvement)
 
         except Exception as e:
             logger.warning(f"Gate6 LLM judge failed: {e}")
@@ -381,7 +383,7 @@ class Gate6AnswerQuality:
                         if k in result
                     },
                 }
-                return self._make_result(blended, start, details)
+                return self._make_result(blended, start, details, improvement=improvement)
 
         except Exception as e:
             logger.warning(f"Gate6 no-ref-llm failed: {e}")
@@ -539,7 +541,18 @@ class Gate6AnswerQuality:
                             "Checklist 维度未通过:\n" + "\n".join(fix_lines)
                         )
 
-                return self._make_result(blended, start, details)
+                # ── 记录数据溯源 ──
+                improvement.init_reasoning_chain()
+                for dim_name in effective_items:
+                    improvement.data_provenance.record(
+                        field=f"gate6_checklist_{dim_name}",
+                        value=1 if checks[dim_name] else 0,
+                        source="gate6:checklist_item",
+                        source_id=dim_name,
+                        confidence=0.9,
+                    )
+
+                return self._make_result(blended, start, details, improvement=improvement)
 
         except Exception as e:
             logger.warning(f"Gate6 checklist failed: {e}")
@@ -620,7 +633,8 @@ class Gate6AnswerQuality:
             "composite": round(avg_score, 4),
         })
 
-    def _make_result(self, score: float, start: float, details: dict | None = None) -> GateResult:
+    def _make_result(self, score: float, start: float, details: dict | None = None,
+                     improvement: Improvement | None = None) -> GateResult:
         passed = score >= self.config.pass_threshold
         details = details or {}
         details["score"] = round(score, 4)
@@ -643,7 +657,7 @@ class Gate6AnswerQuality:
             except Exception as e:
                 logger.warning("Gate6 error classifier failed: %s", e)
 
-        return GateResult(
+        result = GateResult(
             gate_name=GateName.GATE6,
             passed=passed,
             reason=(
@@ -654,6 +668,60 @@ class Gate6AnswerQuality:
             details=details,
             duration_ms=(time.time() - start) * 1000,
         )
+
+        if improvement is not None:
+            self._inject_reasoning(improvement, result, score, details)
+        return result
+
+    def _inject_reasoning(
+        self,
+        improvement: Improvement,
+        result: GateResult,
+        score: float,
+        details: dict,
+    ) -> None:
+        """向推理链追加 Gate6 决策记录"""
+        improvement.init_reasoning_chain()
+        method = details.get("method", "unknown")
+        evidence = [
+            EvidenceSource(
+                type=EvidenceType.LLM_JUDGMENT,
+                name=f"gate6_{method}",
+                value={
+                    "score": round(score, 4),
+                    "threshold": self.config.pass_threshold,
+                    "passed": result.passed,
+                    "method": method,
+                },
+                confidence=0.85,
+            ),
+        ]
+        checks = details.get("checks")
+        if checks:
+            evidence.append(EvidenceSource(
+                type=EvidenceType.LLM_JUDGMENT,
+                name="checklist_items",
+                value={k: v for k, v in checks.items()},
+                confidence=0.85,
+            ))
+
+        # 记录数据溯源
+        improvement.data_provenance.record(
+            field="gate6_score",
+            value=round(score, 4),
+            source=f"gate6:{method}",
+            confidence=0.85,
+        )
+
+        step = ReasoningStep(
+            step_id=f"g6-{uuid.uuid4().hex[:8]}",
+            gate="gate6",
+            decision="PASS" if result.passed else "FAIL",
+            reason=result.reason,
+            evidence=evidence,
+            confidence=0.85,
+        )
+        improvement.reasoning_chain.add_step(step)
 
 
 # ── 工具函数 ──────────────────────────────────────────────

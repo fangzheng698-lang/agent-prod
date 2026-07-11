@@ -25,9 +25,11 @@ from __future__ import annotations
 
 import logging
 import time
+import uuid
 from typing import Any
 
 from .models import GateName, GateResult, Improvement
+from .reasoning import EvidenceSource, EvidenceType, ReasoningStep
 from .tool_risk import RiskLevel, auto_classify_tool, get_risk, is_known_tool
 from .argument_inspection import check_tool_call, ThreatLevel
 from .intent_classifier import rule_based_classify
@@ -286,7 +288,7 @@ class Gate0Permission:
             violation_tools = [b["tool"] for b in blocks]
             if mode == "observe":
                 # 观察者模式：记录违规但不拦截
-                return GateResult(
+                result = GateResult(
                     gate_name=GateName.GATE0,
                     passed=True,
                     reason=(f"[OBSERVE] 检测到 {len(blocks)} 次违规但不拦截: "
@@ -294,7 +296,13 @@ class Gate0Permission:
                     details=details,
                     duration_ms=duration_ms,
                 )
-            return GateResult(
+                self._inject_reasoning(
+                    improvement, result, agent, blocks,
+                    len(passes), len(elevated_logs),
+                    len(dangerous_logs), len(arg_flagged),
+                )
+                return result
+            result = GateResult(
                 gate_name=GateName.GATE0,
                 passed=False,
                 reason=(f"权限拒绝: agent '{agent}' 的 {len(blocks)} 次工具调用被拦截: "
@@ -302,8 +310,14 @@ class Gate0Permission:
                 details=details,
                 duration_ms=duration_ms,
             )
+            self._inject_reasoning(
+                improvement, result, agent, blocks,
+                len(passes), len(elevated_logs),
+                len(dangerous_logs), len(arg_flagged),
+            )
+            return result
 
-        return GateResult(
+        result = GateResult(
             gate_name=GateName.GATE0,
             passed=True,
             reason=(f"权限检查通过: agent '{agent}', {total_calls} 次调用 "
@@ -312,9 +326,66 @@ class Gate0Permission:
             details=details,
             duration_ms=duration_ms,
         )
+        self._inject_reasoning(
+            improvement, result, agent, [],
+            len(passes), len(elevated_logs),
+            len(dangerous_logs), len(arg_flagged),
+        )
+        return result
 
     def rollback(self, improvement: Improvement) -> None:
         pass
+
+    @staticmethod
+    def _inject_reasoning(
+        improvement: Improvement,
+        result: GateResult,
+        agent: str,
+        blocks: list[dict],
+        benign_count: int,
+        elevated_count: int,
+        dangerous_count: int,
+        arg_flagged_count: int,
+    ) -> None:
+        """向 improvement 的推理链追加 Gate0 决策记录"""
+        improvement.init_reasoning_chain()
+        evidence = [
+            EvidenceSource(
+                type=EvidenceType.POLICY_RULE,
+                name="risk_classification",
+                value={
+                    "benign": benign_count,
+                    "elevated": elevated_count,
+                    "dangerous": dangerous_count,
+                    "blocked": len(blocks),
+                },
+                confidence=0.99,
+            ),
+        ]
+        if arg_flagged_count > 0:
+            evidence.append(EvidenceSource(
+                type=EvidenceType.PATTERN_MATCH,
+                name="arg_inspection",
+                value={"suspicious": arg_flagged_count},
+                confidence=0.95,
+            ))
+        if blocks:
+            evidence.append(EvidenceSource(
+                type=EvidenceType.POLICY_RULE,
+                name="blocked_tools",
+                value=[b.get("tool", "") for b in blocks],
+                confidence=1.0,
+            ))
+
+        step = ReasoningStep(
+            step_id=f"g0-{uuid.uuid4().hex[:8]}",
+            gate="gate0",
+            decision="PASS" if result.passed else "BLOCK",
+            reason=result.reason,
+            evidence=evidence,
+            confidence=0.95 if result.passed else 0.99,
+        )
+        improvement.reasoning_chain.add_step(step)
 
     # ═══════════════════════════════════════════════════════════
     #  运行时单次工具准入 (方案 A: Gateway 工具代理)
