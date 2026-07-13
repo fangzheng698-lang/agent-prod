@@ -1361,6 +1361,98 @@ async def gate0_get_mode(agent: str = ""):
     return gate0.get_mode(agent)
 
 
+# ════════════════════════════════════════════════════════════════
+#  Phase 3: 异步审批 endpoints
+# ════════════════════════════════════════════════════════════════
+
+@app.get("/v1/approvals")
+async def list_approvals(agent: str = "", status: str = ""):
+    """GET /v1/approvals — list approval records.
+
+    ?agent=qclaw           filter by agent
+    ?status=pending        filter by status (pending|approved|rejected|expired)
+    """
+    if not gateway:
+        raise HTTPException(503, "Quality gates not available")
+    q = gateway.engine.approval_queue
+    if status == "pending":
+        recs = q.list_pending(agent=agent or None)
+    else:
+        recs = q.list_all()
+        if agent:
+            recs = [r for r in recs if r.agent == agent]
+        if status:
+            recs = [r for r in recs if r.status.value == status]
+    return {"approvals": [r.to_dict() for r in recs]}
+
+
+@app.get("/v1/approvals/{approval_id}")
+async def get_approval(approval_id: str):
+    """GET /v1/approvals/{id} — fetch a single approval record."""
+    if not gateway:
+        raise HTTPException(503, "Quality gates not available")
+    rec = gateway.engine.approval_queue.get(approval_id)
+    if not rec:
+        raise HTTPException(404, f"Approval {approval_id} not found")
+    return rec.to_dict()
+
+
+@app.post("/v1/approvals/{approval_id}/decide")
+async def decide_approval(approval_id: str, payload: dict = Body(...)):  # noqa: B008
+    """POST /v1/approvals/{id}/decide — record human decision and resume pipeline.
+
+    Body:
+    {
+      "approved": true | false,
+      "approver": "alice",
+      "reason": "..."    // optional
+    }
+
+    On approved=true: runs gate6, gate7 and promotes to PRODUCTION if they pass.
+    On approved=false: marks improvement as REJECTED.
+    """
+    if not gateway:
+        raise HTTPException(503, "Quality gates not available")
+    approved = bool(payload.get("approved"))
+    approver = payload.get("approver", "unknown")
+    reason = payload.get("reason", "")
+    if not approver:
+        raise HTTPException(400, "approver required")
+    try:
+        imp = gateway.engine.resume_after_approval(
+            approval_id, approver, approved, reason,
+        )
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+    return {
+        "ok": True,
+        "approval_id": approval_id,
+        "improvement_id": imp.id,
+        "status": imp.status.value if hasattr(imp.status, 'value') else str(imp.status),
+        "approved": approved,
+    }
+
+
+@app.post("/v1/approvals/{approval_id}/approve")
+async def approve_only(approval_id: str, payload: dict = Body(...)):  # noqa: B008
+    """Convenience endpoint: approve and resume.
+
+    Body: {"approver": "alice", "reason": "..."}
+    """
+    payload["approved"] = True
+    return await decide_approval(approval_id, payload)
+
+
+@app.post("/v1/approvals/{approval_id}/reject")
+async def reject_only(approval_id: str, payload: dict = Body(...)):  # noqa: B008
+    """Convenience endpoint: reject.
+
+    Body: {"approver": "alice", "reason": "..."}
+    """
+    payload["approved"] = False
+    return await decide_approval(approval_id, payload)
+
+
 @app.get("/v1/gray/status/{improvement_id}")
 async def gray_status(improvement_id: str):
     """查询灰度阶梯状态。

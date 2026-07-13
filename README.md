@@ -166,6 +166,134 @@ result = delegator.delegate(task)
 Comes with a LangChain adapter (`create_langchain_tool`) to plug into existing
 agent pipelines.
 
+## Multi-Agent Trust Chain — Phase 5
+
+When a parent agent delegates to a child, the child inherits a *subset* of the
+parent's authority — never more. `TrustChainValidator` enforces this at Gate0:
+
+```python
+from agent_prod.gates.trust_chain import TrustChainValidator, TaskACL, TrustLevel
+
+tc = TrustChainValidator()
+tc.register_task(TaskACL(
+    task_id="task-001",
+    parent_agent="qclaw",
+    child_agent="code-reviewer",
+    trust_level=TrustLevel.RESTRICTED,
+    allowed_tools={"Read", "Grep"},          # child can only call these
+    allowed_domains={"finance"},             # child can only operate in this domain
+    expires_at=datetime.now(UTC) + timedelta(hours=1),
+))
+
+# Gate0 now blocks any tool call from `child_agent=code-reviewer`
+# outside the ACL — even if it's declared in declared_tools.
+```
+
+| Trust level | Behavior |
+|---|---|
+| `RESTRICTED` (default) | Child can only use tools in `allowed_tools` |
+| `FULL` | Child inherits parent's full tool palette — no restriction |
+| `SANDBOX` | Read-only / benign tools only; auto-expires |
+
+Without a registered ACL, the validator stays out of the way — Gate0 falls
+back to its standard declared-tools + auth-grant checks. So trust-chain
+enforcement is opt-in per delegation relationship.
+
+## Async Approval Workflow — Phase 3
+
+Gate5 can emit a `pending_approval` state instead of binary pass/fail. The
+pipeline halts, the improvement is persisted, and the pipeline resumes on
+external decision — via HTTP callback, CLI, or webhook.
+
+```bash
+# Pipeline reaches Gate5 with only "Human approval" missing
+# → status: pending_approval, improvement persisted
+
+# Approve via HTTP
+curl -X POST http://localhost:8080/v1/approvals/$APPROVAL_ID/decide \
+  -H "Content-Type: application/json" \
+  -d '{"approved": true, "approver": "alice", "reason": "looks good"}'
+# → runs Gate6, Gate7, promotes to PRODUCTION
+
+# Or reject
+curl -X POST http://localhost:8080/v1/approvals/$APPROVAL_ID/decide \
+  -d '{"approved": false, "approver": "bob", "reason": "rollback plan missing"}'
+# → status: rejected, fail_gate: gate5_approval
+```
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /v1/approvals` | List approval records (filter by `agent`, `status`) |
+| `GET /v1/approvals/{id}` | Fetch a single record |
+| `POST /v1/approvals/{id}/decide` | Approve or reject; resumes pipeline |
+| `POST /v1/approvals/{id}/approve` | Convenience: approve + resume |
+| `POST /v1/approvals/{id}/reject` | Convenience: reject |
+
+Approval records are idempotent — deciding twice raises `ValueError`. Records
+auto-expire after a configurable TTL (default 24h).
+
+## Domain Policy Engine — Phase 2
+
+Industry-specific risk escalation at Gate0. The base tool risk is *only
+escalated, never downgraded* when an agent operates in a regulated domain.
+
+```yaml
+# config.yaml
+gates:
+  domain_policy:
+    enabled: true
+    domains:
+      finance:
+        risk_overrides:
+          web_search: elevated   # benign → elevated in finance context
+        required_compliance: [sox, pci_dss]
+      medical:
+        risk_overrides:
+          read_file: elevated
+        required_compliance: [hipaa]
+```
+
+```python
+from agent_prod.gates.domain_policy import DomainPolicyEngine
+
+engine = DomainPolicyEngine(config)
+result = engine.get_effective_risk("web_search", "my-agent", domain="finance")
+# RiskLevel.ELEVATED  (was BENIGN in vanilla Gate0)
+
+# Compliance claims are enforced: missing HIPAA claim in medical domain → block
+cr = engine.validate_compliance_claims(
+    tool="read_file", domain="medical",
+    compliance_claims={},  # missing HIPAA
+    agent_type="my-agent",
+)
+assert cr.violation  # ViolationType.MISSING_COMPLIANCE
+```
+
+## Observability — Prometheus + Grafana — Phase 4
+
+```bash
+# Spin up the full monitoring stack
+docker compose --profile observability up -d
+# → Prometheus on :9090, Grafana on :3001
+```
+
+Pre-built dashboard (`deploy/grafana/dashboards/agent_prod_overview.json`)
+auto-provisions with panels for: pipeline outcomes, per-gate rejection rates,
+gate1 circuit breaker state, domain-policy escalations, and approval queue
+depth. The dashboard is provisioned automatically on first Grafana boot —
+no manual import required.
+
+Key Prometheus metrics exposed on `:8080/metrics`:
+
+| Metric | Type | Labels |
+|---|---|---|
+| `agent_prod_pipeline_total` | counter | status, agent |
+| `agent_prod_gate_duration_ms` | histogram | — |
+| `agent_prod_rejections_total` | counter | gate |
+| `agent_prod_gate1_degraded` | gauge | — |
+| `agent_prod_domain_escalations_total` | counter | domain, tool, agent |
+| `agent_prod_domain_compliance_blocks_total` | counter | domain, violation_type |
+
 ## GatePlugin Interface — Extend With One Class
 
 Every gate is a plug-in. Write your own gate in ~30 lines:
@@ -203,7 +331,7 @@ no framework fork. Add a gate, register it, and `from_yaml()` picks it up.
 |---|---|
 | 217 real agent sessions | Validated against Hermes traces |
 | 4,345 tool calls | Exercised tool-risk and trace-integrity paths |
-| 194 tests | CI passes without warnings |
+| 219 tests | CI passes without warnings |
 | Dogfood report | [docs/DOGFOOD_REPORT.md](docs/DOGFOOD_REPORT.md) — self-evaluation with 70% pass rate |
 
 ## Why Not Just an Eval Framework?

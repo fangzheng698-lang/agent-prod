@@ -304,16 +304,45 @@ class Gate5ReleaseAudit:
         critical = [r for r in results if r.severity == "critical" and not r.passed]
         warnings = [r for r in results if r.severity == "warning" and not r.passed]
 
+        # ── Phase 3: 异步审批信号 ──────────────────────────
+        # 当 enforce 模式下唯一的 critical 失败是 "Human approval" 时，
+        # 不立即 reject，而是标记 pending_approval 由外部审批队列异步消化。
+        pending_approval = False
+        if (
+            not self.config.is_observe
+            and not all_pass
+            and len(critical) == 1
+            and critical[0].name == "Human approval"
+        ):
+            pending_approval = True
+            # 把 "Human approval" 这条 critical 失败降级为 warning，
+            # 这样 Gate5 自身判定为通过，但 engine 通过 pending_approval 标记
+            # 识别需要等待审批，不能直接进入 production。
+            for r in results:
+                if r.name == "Human approval" and not r.passed:
+                    r.severity = "warning"
+                    r.reason += " [pending external approval]"
+            critical = [r for r in results if r.severity == "critical" and not r.passed]
+            all_pass = True
+            logger.info(
+                "Gate5 emitting pending_approval for improvement %s "
+                "(only failing critical: Human approval)",
+                improvement.id,
+            )
+
         result = GateResult(
             gate_name=GateName.GATE5,
             passed=all_pass,
             reason=(
                 "Release audit passed"
-                if all_pass
-                else f"{len(critical)} critical + {len(warnings)} warning policy violation(s)"
+                if all_pass and not pending_approval
+                else ("Pending human approval"
+                      if pending_approval
+                      else f"{len(critical)} critical + {len(warnings)} warning policy violation(s)")
             ),
             details={
                 "all_pass": all_pass,
+                "pending_approval": pending_approval,
                 "rules": [r.model_dump() for r in results],
                 "critical_violations": [r.name for r in critical],
                 "warnings": [r.name for r in warnings],

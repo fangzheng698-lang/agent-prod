@@ -165,9 +165,11 @@ class TestGate5ReleaseAudit:
         for gn in (GateName.GATE1, GateName.GATE2, GateName.GATE3, GateName.GATE4):
             imp.add_result(GateResult(gate_name=gn, passed=True))
         result = gate5.verify(imp)
-        # enforce 模式下无人审批 → 失败
-        assert not result.passed
+        # Phase 3: enforce 模式下仅缺 Human approval → emit pending_approval
+        assert result.passed, "Gate5 should pass (only Human approval missing, async)"
+        assert result.details.get("pending_approval") is True
         assert "Human approval" in str(result.details)
+        assert "Pending human approval" in result.reason
 
     def test_observe_mode_passes_without_human(self):
         from agent_prod.gates.gate5_audit import Gate5ReleaseAudit, Gate5Config

@@ -47,6 +47,16 @@ try:
         "agent_prod_gate1_degraded",
         "Gate1 circuit breaker degraded (1=degraded)",
     )
+    _domain_escalations = _metrics.labeled_counter(
+        "agent_prod_domain_escalations_total",
+        "Tool risk escalated by domain policy",
+        ["domain", "tool", "agent"],
+    )
+    _domain_compliance_blocks = _metrics.labeled_counter(
+        "agent_prod_domain_compliance_blocks_total",
+        "Tools blocked by missing compliance claim",
+        ["domain", "tool", "violation_type"],
+    )
     METRICS_AVAILABLE = True
 except Exception:
     METRICS_AVAILABLE = False
@@ -60,6 +70,8 @@ from .gate5_audit import Gate5Config, Gate5ReleaseAudit
 from .gate6_answer_quality import Gate6AnswerQuality, Gate6Config
 from .gate7_execution_consistency import Gate7ExecutionConsistency
 from . import tool_risk  # 工具风险分类配置
+from .domain_policy import DomainPolicyEngine  # 行业维度策略引擎
+from .approval import ApprovalQueue, default_webhook
 from .config_schema import validate_config, ConfigSchema
 from .errors import AppError, ErrorCode
 from .models import (
@@ -305,6 +317,9 @@ class QualityGateEngine:
         # 从 config.yaml 的 tools.risk / tools.aliases 加载
         tool_risk.configure(self.config)
 
+        # ── 领域策略引擎（行业维度风险升级） ───────
+        self._domain_policy = DomainPolicyEngine(self.config)
+
         # ── 沙箱配置 ──────────────────────────────────
         try:
             from .tool_executor import load_sandbox_config
@@ -324,7 +339,8 @@ class QualityGateEngine:
 
         # 初始化各门
         self._auth_store = AuthGrantStore()
-        self.gate0 = Gate0Permission.from_yaml(self.config, self._auth_store)
+        self.gate0 = Gate0Permission.from_yaml(self.config, self._auth_store,
+                                               domain_policy=self._domain_policy)
         self.gate1 = Gate1Execution(gate1_config or Gate1Config.from_yaml(self.config))
         self.gate2 = Gate2TraceIntegrity.from_yaml(self.config) if not use_otel \
                      else Gate2TraceIntegrity(use_otel=True)
@@ -341,6 +357,7 @@ class QualityGateEngine:
         self.gate5 = Gate5ReleaseAudit(
             config=Gate5Config.from_yaml(self.config),
         )
+        self.approval_queue = ApprovalQueue(webhook_fn=default_webhook)
         self.gate6 = Gate6AnswerQuality(
             config=Gate6Config.from_yaml(self.config),
         )
@@ -617,6 +634,23 @@ class QualityGateEngine:
                 _gate_duration.observe(result.duration_ms)
                 if not result.passed:
                     _rejections.inc(gate=gate_name_str)
+                # ── 领域策略指标（仅 gate0 输出） ──
+                if gate_name == GateName.GATE0 and result.details:
+                    domain = result.details.get("domain", "")
+                    if domain:
+                        agent_label = result.details.get("agent", "unknown")
+                        # 升级次数：_DETAILS 中是计数，但每次 pipeline 仅记录当前批次
+                        for _i in range(result.details.get("domain_escalations", 0)):
+                            _domain_escalations.inc(
+                                domain=domain, tool="*", agent=agent_label
+                            )
+                        for v in result.details.get("violations", []):
+                            if isinstance(v, dict) and v.get("type", "").startswith("domain_"):
+                                _domain_compliance_blocks.inc(
+                                    domain=domain,
+                                    tool=v.get("tool", "unknown"),
+                                    violation_type=v.get("type", ""),
+                                )
 
             # 记录执行日志
             _log_gate(
@@ -630,6 +664,61 @@ class QualityGateEngine:
             # ── Gate1 熔断状态更新 ─────────────────────
             if gate_name == GateName.GATE1:
                 self._on_gate1_result(result.passed)
+
+            # ── Phase 3: 异步审批挂起 ──
+            if (
+                gate_name == GateName.GATE5
+                and result.passed
+                and result.details
+                and result.details.get("pending_approval")
+            ):
+                # 仅缺人工审批这一项 → 挂起 pipeline，等待外部审批
+                remaining = [g for (g, _v, _r) in pipeline[pipeline.index((gate_name, verify_fn, rollback_fn))+1:]]
+                # 转 GateName -> str 列表
+                remaining_names = [g.value if hasattr(g, 'value') else str(g)
+                                   for g in remaining]
+                # 把 improvement 设为 PENDING_APPROVAL 状态并持久化
+                improvement.status = ImprovementStatus.PENDING_APPROVAL
+                # 挂起状态必须持久化（即使 persist=False），否则进程重启后无法 resume
+                try:
+                    self.repository.save(improvement)
+                except Exception as e:
+                    logger.error("Failed to persist pending_approval %s: %s",
+                                 improvement.id, e)
+
+                # 注册到审批队列
+                rec = self.approval_queue.request(
+                    improvement,
+                    remaining_gates=remaining_names,
+                    requested_by=improvement.metadata.get("agent", "system"),
+                    webhook_url=improvement.metadata.get("approval_webhook_url"),
+                    metadata={
+                        "domain": improvement.metadata.get("domain", ""),
+                        "agent": improvement.metadata.get("agent", ""),
+                        "domain_escalations":
+                            result.details.get("domain_escalations", 0)
+                            if isinstance(result.details, dict) else 0,
+                    },
+                )
+                total_ms = (time.time() - pipeline_start) * 1000
+                _log_pipeline(
+                    improvement_id=improvement.id,
+                    status="PENDING_APPROVAL",
+                    gates_passed=gates_passed + 1,  # gate5 算通过
+                    total_gates=len(pipeline),
+                    duration_ms=total_ms,
+                )
+                if METRICS_AVAILABLE:
+                    _pipeline_total.inc(
+                        status="pending_approval",
+                        agent=improvement.metadata.get("agent", "unknown"),
+                    )
+                    _pipeline_duration.observe(total_ms)
+                    _gates_passed_gauge.set(gates_passed + 1)
+                    _degraded_gauge.set(1 if self._gate1_is_degraded() else 0)
+                logger.info("Pipeline paused at gate5 for approval %s (improvement %s)",
+                            rec.approval_id, improvement.id)
+                return improvement
 
             if not result.passed:
                 # 回滚（不回滚失败也不抛）
@@ -761,3 +850,149 @@ class QualityGateEngine:
                              improvement.id, e)
 
         return result
+
+    # ══════════════════════════════════════════════════════════
+    #  Phase 3: 异步审批恢复
+    # ══════════════════════════════════════════════════════════
+
+    def resume_after_approval(self, approval_id: str, approver: str,
+                               approved: bool, reason: str = "",
+                               persist: bool = True) -> Improvement:
+        """Resume a pipeline after external approval decision.
+
+        Called by the HTTP callback endpoint or CLI. Returns the Improvement
+        after running remaining gates (gate6, gate7).
+        """
+        rec = self.approval_queue.get(approval_id)
+        if not rec:
+            raise ValueError(f"Approval {approval_id} not found")
+
+        # Idempotency: already decided
+        if not rec.is_pending:
+            raise ValueError(
+                f"Approval {approval_id} already {rec.status.value} "
+                f"by {rec.decided_by}"
+            )
+
+        # Load improvement from repository
+        imp = self.repository.get(rec.improvement_id)
+        if not imp:
+            raise ValueError(f"Improvement {rec.improvement_id} not found in repository")
+
+        if approved:
+            self.approval_queue.approve(approval_id, approver, reason)
+            # 把审批决策回写到 improvement（用于追溯 / Gate6 审计）
+            from datetime import UTC, datetime
+            imp.human_approver = approver
+            imp.human_approved_at = datetime.now(UTC)
+        else:
+            self.approval_queue.reject(approval_id, approver, reason)
+            imp.human_approver = approver  # 记录谁拒绝（human_approved_at 留空）
+            imp.status = ImprovementStatus.REJECTED
+            imp.fail_gate = "gate5_approval"
+            imp.fail_reason = reason or "Rejected by human approver"
+            if persist:
+                self.repository.save(imp)
+            logger.info("Improvement %s rejected by %s via approval %s",
+                        imp.id, approver, approval_id)
+            return imp
+
+        # Run remaining gates (currently: gate6, gate7)
+        remaining_names = rec.remaining_gates
+        pipeline_start = time.time()
+        gate_map = {
+            "gate6_answer_quality": (self.gate6.verify, self.gate6.rollback),
+            "gate7_execution_consistency": (self.gate7.verify, self.gate7.rollback),
+        }
+        gates_passed = 0
+        total_gates = len(remaining_names)
+
+        for gname in remaining_names:
+            verify_fn, rollback_fn = gate_map.get(gname, (None, None))
+            if not verify_fn:
+                logger.warning("Unknown remaining gate %s, skipping", gname)
+                continue
+
+            e_name = None
+            for member in GateName:
+                if member.value == gname:
+                    e_name = member
+                    break
+            if e_name is None:
+                e_name = gname
+
+            result = self._run_with_timeout(
+                e_name, verify_fn, imp, self.gate_timeout
+            )
+            imp.add_result(result)
+            _log_gate(
+                gate_name=gname,
+                passed=result.passed,
+                duration_ms=result.duration_ms,
+                improvement_id=imp.id,
+                details={"reason": result.reason} if not result.passed else None,
+            )
+            if METRICS_AVAILABLE:
+                if not result.passed:
+                    _rejections.inc(gate=gname)
+
+            if not result.passed:
+                self._run_rollback(rollback_fn, imp)
+                imp.status = ImprovementStatus.REJECTED
+                imp.fail_gate = gname
+                imp.fail_reason = result.reason
+
+                if persist:
+                    self.repository.save(imp)
+
+                total_ms = (time.time() - pipeline_start) * 1000
+                _log_pipeline(
+                    improvement_id=imp.id,
+                    status="REJECTED",
+                    gates_passed=2,
+                    total_gates=total_gates,
+                    duration_ms=total_ms,
+                )
+                if METRICS_AVAILABLE:
+                    _pipeline_total.inc(status="rejected",
+                                        agent=imp.metadata.get("agent", "unknown"))
+                    _degraded_gauge.set(1 if self._gate1_is_degraded() else 0)
+                return imp
+
+            gates_passed += 1
+
+        # All remaining gates passed
+        imp.status = ImprovementStatus.PRODUCTION
+        logger.info("Improvement %s approved and promoted to PRODUCTION by %s",
+                    imp.id, approver)
+
+        # ── 基线自动演进 ──
+        if self.config and self.config.get("gates", {}).get("gate3", {}).get("auto_evolve_baseline", False):
+            try:
+                _evolve_baseline(imp, self.repository)
+            except Exception as e:
+                logger.warning("Baseline evolution failed: %s", e)
+
+        # ── 写飞轮日志 ──
+        total_ms = (time.time() - pipeline_start) * 1000
+        try:
+            self._write_flywheel_log(imp, total_ms, True)
+        except Exception as e:
+            logger.warning("Flywheel log write failed: %s", e)
+
+        if persist:
+            self.repository.save(imp)
+
+        _log_pipeline(
+            improvement_id=imp.id,
+            status="PRODUCTION",
+            gates_passed=gates_passed,
+            total_gates=total_gates,
+            duration_ms=total_ms,
+        )
+        if METRICS_AVAILABLE:
+            _pipeline_total.inc(status="production",
+                                agent=imp.metadata.get("agent", "unknown"))
+            _degraded_gauge.set(1 if self._gate1_is_degraded() else 0)
+
+        return imp

@@ -33,6 +33,8 @@ from .reasoning import EvidenceSource, EvidenceType, ReasoningStep
 from .tool_risk import RiskLevel, auto_classify_tool, get_risk, is_known_tool
 from .argument_inspection import check_tool_call, ThreatLevel
 from .intent_classifier import rule_based_classify
+from .domain_policy import DomainPolicyEngine, ViolationType
+from .trust_chain import TrustChainValidator, TrustLevel, TaskACL
 
 logger = logging.getLogger(__name__)
 
@@ -43,9 +45,15 @@ class Gate0Permission:
     从 config.yaml gate0 段加载 auth_grant_store 和阈值配置。
     """
 
-    def __init__(self, config: dict | None = None, auth_store=None):
+    def __init__(self, config: dict | None = None, auth_store=None,
+                 domain_policy: DomainPolicyEngine | None = None,
+                 trust_chain: TrustChainValidator | None = None):
         self._config = config or {}
         self._auth_store = auth_store  # AuthGrantStore | None
+        # ── 领域策略引擎（行业维度风险升级 + 合规声明校验） ──
+        self._domain_policy = domain_policy or DomainPolicyEngine(self._config)
+        # ── 多 Agent 信任链验证器（Phase 5） ──
+        self._trust_chain = trust_chain or TrustChainValidator()
         gate0_cfg = self._config.get("gates", {}).get("gate0", {})
         self._block_unknown = gate0_cfg.get("block_unknown_tools", True)
         self._skip_arg_inspection = gate0_cfg.get("skip_arg_inspection", False)
@@ -106,8 +114,9 @@ class Gate0Permission:
 
     @classmethod
     def from_yaml(cls, config: dict | None,
-                  auth_store=None) -> Gate0Permission:
-        return cls(config=config, auth_store=auth_store)
+                  auth_store=None,
+                  domain_policy: DomainPolicyEngine | None = None) -> Gate0Permission:
+        return cls(config=config, auth_store=auth_store, domain_policy=domain_policy)
 
     # ═══════════════════════════════════════════════════════════
     #  验证逻辑
@@ -120,6 +129,11 @@ class Gate0Permission:
         declared: list[str] = improvement.metadata.get("declared_tools", [])
         declared_set = set(declared)
         auth_grant_id: str = improvement.metadata.get("auth_grant_id", "")
+        domain: str = improvement.metadata.get("domain", "")
+        compliance_claims: dict[str, Any] = improvement.metadata.get("compliance_claims", {}) or {}
+        # ── Phase 5: 多 Agent 信任链 ──
+        parent_agent: str = improvement.metadata.get("parent_agent", "")
+        task_id: str = improvement.metadata.get("task_id", "")
 
         decisions = improvement.metadata.get("decisions", [])
         total_calls = 0
@@ -140,10 +154,41 @@ class Gate0Permission:
         blocks: list[dict] = []
         elevated_logs: list[dict] = []
         dangerous_logs: list[dict] = []
+        # ── 领域策略违规记录（合规声明缺失等） ──
+        domain_escalations: list[dict] = []
+        domain_violations: list[dict] = []
 
         for tc in all_tools:
             tool = tc["tool"]
             risk = get_risk(tool, agent)
+
+            # ── Phase 5: 信任链工具作用域检查（最早，先于未知工具分类） ──
+            # 信任链是更基础的约束：父 Agent 没授予的工具，子 Agent 不应调用，
+            # 无论该工具是否已知、是否需要 LLM 分类。
+            if parent_agent and self._trust_chain:
+                allowed, reason = self._trust_chain.validate_tool_scope(
+                    tool_name=tool, child_agent=agent,
+                    agent_type=agent, task_id=task_id or None,
+                )
+                if not allowed:
+                    blocks.append({
+                        **tc, "type": "trust_chain_violation",
+                        "parent_agent": parent_agent,
+                        "reason": reason,
+                    })
+                    continue
+                # ── 域作用域检查 ──
+                if domain:
+                    dom_ok, dom_reason = self._trust_chain.validate_domain_scope(
+                        domain, agent,
+                    )
+                    if not dom_ok:
+                        blocks.append({
+                            **tc, "type": "trust_chain_domain_violation",
+                            "parent_agent": parent_agent,
+                            "reason": dom_reason,
+                        })
+                        continue
 
             # ── 未知工具 → 尝试 LLM 自动分类 ──
             if risk is None:
@@ -164,6 +209,25 @@ class Gate0Permission:
                     dangerous_logs.append({
                         **tc, "risk": "unknown", "note": "unknown tool, logged only"
                     })
+                    continue
+
+            # ── 领域策略升级（行业维度：只升不降） ──
+            if domain and risk is not None:
+                dp_result = self._domain_policy.get_effective_risk(tool, agent, domain)
+                if dp_result.escalated:
+                    domain_escalations.append({**tc, "domain": domain,
+                        "base_risk": risk.value, "effective_risk": dp_result.effective_risk.value})
+                    risk = dp_result.effective_risk
+
+                # ── 合规声明校验 ──
+                cr = self._domain_policy.validate_compliance_claims(
+                    tool, domain, compliance_claims, agent,
+                )
+                if cr.violation:
+                    blocks.append({**tc, "type": f"domain_{cr.violation.value}",
+                        "domain": domain, "reason": cr.violation_detail})
+                    domain_violations.append({**tc, "type": cr.violation.value,
+                        "detail": cr.violation_detail})
                     continue
 
             # ── benign → 记录放行 ──
@@ -268,6 +332,9 @@ class Gate0Permission:
             "agent": agent,
             "total_tool_calls": total_calls,
             "declared_tools": declared,
+            "domain": domain,
+            "domain_escalations": len(domain_escalations),
+            "domain_compliance_violations": len(domain_violations),
             "benign_passed": len(passes),
             "elevated_logged": len(elevated_logs),
             "dangerous_authorized": len(dangerous_logs),
@@ -286,13 +353,18 @@ class Gate0Permission:
 
         if blocks:
             violation_tools = [b["tool"] for b in blocks]
+            domain_reason = ""
+            if domain_escalations:
+                domain_reason += f" domain_escalations={len(domain_escalations)}"
+            if domain_violations:
+                domain_reason += f" domain_compliance={len(domain_violations)}"
             if mode == "observe":
                 # 观察者模式：记录违规但不拦截
                 result = GateResult(
                     gate_name=GateName.GATE0,
                     passed=True,
                     reason=(f"[OBSERVE] 检测到 {len(blocks)} 次违规但不拦截: "
-                            f"{violation_tools}"),
+                            f"{violation_tools}{domain_reason}"),
                     details=details,
                     duration_ms=duration_ms,
                 )
@@ -300,13 +372,14 @@ class Gate0Permission:
                     improvement, result, agent, blocks,
                     len(passes), len(elevated_logs),
                     len(dangerous_logs), len(arg_flagged),
+                    domain_escalations, domain_violations,
                 )
                 return result
             result = GateResult(
                 gate_name=GateName.GATE0,
                 passed=False,
                 reason=(f"权限拒绝: agent '{agent}' 的 {len(blocks)} 次工具调用被拦截: "
-                        f"{violation_tools}"),
+                        f"{violation_tools}{domain_reason}"),
                 details=details,
                 duration_ms=duration_ms,
             )
@@ -314,6 +387,7 @@ class Gate0Permission:
                 improvement, result, agent, blocks,
                 len(passes), len(elevated_logs),
                 len(dangerous_logs), len(arg_flagged),
+                domain_escalations, domain_violations,
             )
             return result
 
@@ -322,7 +396,8 @@ class Gate0Permission:
             passed=True,
             reason=(f"权限检查通过: agent '{agent}', {total_calls} 次调用 "
                     f"(benign={len(passes)} elevated={len(elevated_logs)} "
-                    f"dangerous={len(dangerous_logs)} blocked=0)"),
+                    f"dangerous={len(dangerous_logs)} blocked=0)"
+                    f"{f' domain={domain}' if domain else ''}"),
             details=details,
             duration_ms=duration_ms,
         )
@@ -330,6 +405,7 @@ class Gate0Permission:
             improvement, result, agent, [],
             len(passes), len(elevated_logs),
             len(dangerous_logs), len(arg_flagged),
+            domain_escalations, domain_violations,
         )
         return result
 
@@ -346,6 +422,8 @@ class Gate0Permission:
         elevated_count: int,
         dangerous_count: int,
         arg_flagged_count: int,
+        domain_escalations: list[dict] | None = None,
+        domain_violations: list[dict] | None = None,
     ) -> None:
         """向 improvement 的推理链追加 Gate0 决策记录"""
         improvement.init_reasoning_chain()
@@ -374,6 +452,23 @@ class Gate0Permission:
                 type=EvidenceType.POLICY_RULE,
                 name="blocked_tools",
                 value=[b.get("tool", "") for b in blocks],
+                confidence=1.0,
+            ))
+        if domain_escalations:
+            evidence.append(EvidenceSource(
+                type=EvidenceType.POLICY_RULE,
+                name="domain_risk_escalation",
+                value=[e.get("tool", "") for e in domain_escalations],
+                confidence=0.98,
+            ))
+        if domain_violations:
+            evidence.append(EvidenceSource(
+                type=EvidenceType.POLICY_RULE,
+                name="domain_compliance_violation",
+                value=[{"tool": v.get("tool", ""),
+                        "type": v.get("type", ""),
+                        "detail": v.get("detail", "")[:150]}
+                       for v in domain_violations],
                 confidence=1.0,
             ))
 

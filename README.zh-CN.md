@@ -141,6 +141,127 @@ result = delegator.delegate(task)
 
 附带 LangChain 适配器（`create_langchain_tool`），可接入现有 Agent 管线。
 
+## 多 Agent 信任链（Phase 5）
+
+父 Agent 委托子 Agent 时，子 Agent 继承父 Agent 权限的*子集*——只少不多。
+`TrustChainValidator` 在 Gate0 中实施这个约束：
+
+```python
+from agent_prod.gates.trust_chain import TrustChainValidator, TaskACL, TrustLevel
+
+tc = TrustChainValidator()
+tc.register_task(TaskACL(
+    task_id="task-001",
+    parent_agent="qclaw",
+    child_agent="code-reviewer",
+    trust_level=TrustLevel.RESTRICTED,
+    allowed_tools={"Read", "Grep"},           # 子 Agent 只能调用这些工具
+    allowed_domains={"finance"},              # 只能在这个行业域内操作
+    expires_at=datetime.now(UTC) + timedelta(hours=1),
+))
+
+# Gate0 现在会拦截子 Agent 在 ACL 之外的任何工具调用——即使它在 declared_tools 中
+```
+
+| 信任等级 | 行为 |
+|---|---|
+| `RESTRICTED`（默认）| 子 Agent 只能用 `allowed_tools` 中的工具 |
+| `FULL` | 继承父 Agent 全部工具——无限制 |
+| `SANDBOX` | 只能调用只读/benign 工具；自动过期 |
+
+没有注册 ACL 时，验证器不干预——Gate0 退回到标准声明的工具 + 授权检查。
+所以信任链是按委托关系 opt-in 的。
+
+## 异步审批流（Phase 3）
+
+Gate5 可以发射 `pending_approval` 状态，而不是二元的通过/拒绝。管线暂停，
+改进项持久化，等待外部决策通过 HTTP 回调、CLI 或 webhook 恢复。
+
+```bash
+# 管线到达 Gate5，唯一缺失的是"人工审批"
+# → status: pending_approval，改进项已持久化
+
+# 通过 HTTP 审批
+curl -X POST http://localhost:8080/v1/approvals/$APPROVAL_ID/decide \
+  -H "Content-Type: application/json" \
+  -d '{"approved": true, "approver": "alice", "reason": "没问题"}'
+# → 运行 Gate6、Gate7，晋升为 PRODUCTION
+
+# 拒绝
+curl -X POST http://localhost:8080/v1/approvals/$APPROVAL_ID/decide \
+  -d '{"approved": false, "approver": "bob", "reason": "回滚预案不完整"}'
+# → status: rejected，fail_gate: gate5_approval
+```
+
+| 端点 | 用途 |
+|---|---|
+| `GET /v1/approvals` | 列出审批记录（可按 `agent`、`status` 过滤）|
+| `GET /v1/approvals/{id}` | 查询单条记录 |
+| `POST /v1/approvals/{id}/decide` | 批准或拒绝；自动恢复管线 |
+| `POST /v1/approvals/{id}/approve` | 便捷：批准 + 恢复 |
+| `POST /v1/approvals/{id}/reject` | 便捷：拒绝 |
+
+审批记录是幂等的——重复决策会抛出 `ValueError`。记录在可配置的 TTL 后自动过期（默认 24 小时）。
+
+## 行业域策略引擎（Phase 2）
+
+在 Gate0 实现行业维度的风险升级。基础工具风险在受监管行业中**只能升不能降**。
+
+```yaml
+# config.yaml
+gates:
+  domain_policy:
+    enabled: true
+    domains:
+      finance:
+        risk_overrides:
+          web_search: elevated   # benign → elevated（金融行业上下文）
+        required_compliance: [sox, pci_dss]
+      medical:
+        risk_overrides:
+          read_file: elevated
+        required_compliance: [hipaa]
+```
+
+```python
+from agent_prod.gates.domain_policy import DomainPolicyEngine
+
+engine = DomainPolicyEngine(config)
+result = engine.get_effective_risk("web_search", "my-agent", domain="finance")
+# RiskLevel.ELEVATED（原本是 BENIGN）
+
+# 合规声明检查：医疗域缺少 HIPAA 声明 → 阻断
+cr = engine.validate_compliance_claims(
+    tool="read_file", domain="medical",
+    compliance_claims={},  # missing HIPAA
+    agent_type="my-agent",
+)
+assert cr.violation  # ViolationType.MISSING_COMPLIANCE
+```
+
+## 可观测性 — Prometheus + Grafana（Phase 4）
+
+```bash
+# 启动完整监控栈
+docker compose --profile observability up -d
+# → Prometheus :9090, Grafana :3001
+```
+
+预置仪表盘 (`deploy/grafana/dashboards/agent_prod_overview.json`) 自动配
+置了以下面板：管线结果、各门拒绝率、Gate1 熔断器状态、域策略升级数和审批
+队列深度。首次启动 Grafana 时自动配置，无需手动导入。
+
+`:8080/metrics` 暴露的关键 Prometheus 指标：
+
+| 指标 | 类型 | 标签 |
+|---|---|---|
+| `agent_prod_pipeline_total` | counter | status, agent |
+| `agent_prod_gate_duration_ms` | histogram | — |
+| `agent_prod_rejections_total` | counter | gate |
+| `agent_prod_gate1_degraded` | gauge | — |
+| `agent_prod_domain_escalations_total` | counter | domain, tool, agent |
+| `agent_prod_domain_compliance_blocks_total` | counter | domain, violation_type |
+
 ## GatePlugin 接口 — 继承一个类即可扩展
 
 每道门都是插件。~30 行代码写自己的门：
@@ -194,7 +315,7 @@ docker compose up -d  # Postgres + agent-prod + MCP
 |---|---|
 | 217 条真实会话 | 在 Hermes traces 上验证通过 |
 | 4,345 次工具调用 | 全路径工具风险 + 轨迹完整性 |
-| 194 个测试 | CI 全绿 |
+| 219 个测试 | CI 全绿 |
 | 自评估报告 | [docs/DOGFOOD_REPORT.md](docs/DOGFOOD_REPORT.md) — 70% 通过率 |
 
 ## 从这里开始

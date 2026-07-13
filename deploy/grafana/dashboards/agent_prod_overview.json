@@ -1,0 +1,157 @@
+{
+  "__inputs": [],
+  "__requires": [],
+  "title": "agent-prod Overview",
+  "uid": "agent-prod-overview",
+  "version": 1,
+  "timezone": "browser",
+  "editable": true,
+  "panels": [
+    {
+      "title": "Pipeline Throughput",
+      "type": "stat",
+      "gridPos": {"x": 0, "y": 0, "w": 4, "h": 4},
+      "targets": [
+        {
+          "expr": "sum(rate(agent_prod_pipeline_total[5m]))",
+          "legendFormat": "pipelines/s"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "color": {"mode": "palette-classic"}
+        }
+      }
+    },
+    {
+      "title": "Gate Pass Rate",
+      "type": "gauge",
+      "gridPos": {"x": 4, "y": 0, "w": 4, "h": 4},
+      "targets": [
+        {
+          "expr": "sum(rate(agent_prod_pipeline_total{status=\"production\"}[5m])) / sum(rate(agent_prod_pipeline_total[5m]))",
+          "legendFormat": "pass rate"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red", "value": null},
+              {"color": "orange", "value": 0.8},
+              {"color": "green", "value": 0.95}
+            ]
+          }
+        }
+      }
+    },
+    {
+      "title": "Gate Duration P95 (ms)",
+      "type": "stat",
+      "gridPos": {"x": 8, "y": 0, "w": 4, "h": 4},
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(agent_prod_gate_duration_ms_bucket[5m])) by (le))",
+          "legendFormat": "p95"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {"unit": "ms"}
+      }
+    },
+    {
+      "title": "Rejection Rate by Gate",
+      "type": "barchart",
+      "gridPos": {"x": 12, "y": 0, "w": 6, "h": 4},
+      "targets": [
+        {
+          "expr": "sum(rate(agent_prod_rejections_total[5m])) by (gate)",
+          "legendFormat": "{{gate}}"
+        }
+      ]
+    },
+    {
+      "title": "Domain Escalations (5m)",
+      "type": "barchart",
+      "gridPos": {"x": 0, "y": 4, "w": 6, "h": 4},
+      "targets": [
+        {
+          "expr": "sum(rate(agent_prod_domain_escalations_total[5m])) by (domain)",
+          "legendFormat": "{{domain}}"
+        }
+      ]
+    },
+    {
+      "title": "Domain Compliance Blocks (5m)",
+      "type": "barchart",
+      "gridPos": {"x": 6, "y": 4, "w": 6, "h": 4},
+      "targets": [
+        {
+          "expr": "sum(rate(agent_prod_domain_compliance_blocks_total[5m])) by (domain)",
+          "legendFormat": "{{domain}}"
+        }
+      ]
+    },
+    {
+      "title": "Circuit Breaker Status",
+      "type": "stat",
+      "gridPos": {"x": 12, "y": 4, "w": 4, "h": 4},
+      "targets": [
+        {
+          "expr": "agent_prod_gate1_degraded",
+          "legendFormat": "degraded"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "red", "value": 1}
+            ]
+          }
+        }
+      }
+    },
+    {
+      "title": "Gates Passed per Pipeline",
+      "type": "stat",
+      "gridPos": {"x": 0, "y": 8, "w": 4, "h": 4},
+      "targets": [
+        {
+          "expr": "avg(agent_prod_gates_passed)",
+          "legendFormat": "avg gates"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {"unit": "none"}
+      }
+    },
+    {
+      "title": "Uptime",
+      "type": "stat",
+      "gridPos": {"x": 4, "y": 8, "w": 4, "h": 4},
+      "targets": [
+        {
+          "expr": "agent_prod_uptime_seconds",
+          "legendFormat": "uptime"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "color": {"mode": "palette-classic"}
+        }
+      }
+    }
+  ]
+}

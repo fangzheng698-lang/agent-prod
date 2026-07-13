@@ -43,6 +43,7 @@ class ImprovementStatus(str, Enum):
     PRODUCTION = "production"        # 正式上线
     REJECTED = "rejected"            # 被拒绝
     ROLLED_BACK = "rolled_back"      # 已回滚
+    PENDING_APPROVAL = "pending_approval"  # 等待人工审批（Gate5 emit）
 
 class GateName(str, Enum):
     """质量门名称"""

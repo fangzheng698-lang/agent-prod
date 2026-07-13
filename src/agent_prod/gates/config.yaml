@@ -148,6 +148,37 @@ observability:
     enabled: false
     endpoint: http://localhost:4317
     service_name: agent-prod
+
+policy:
+  domains:
+    finance:
+      tools:
+        write_file:
+          risk_override: dangerous
+          required_claim: FINRA_audit_trail
+          audit_level: strict
+        patch:
+          risk_override: dangerous
+          required_claim: FINRA_audit_trail
+          audit_level: strict
+        delegate_task:
+          required_claim: SAR_review_required
+          audit_level: standard
+        shell_exec:
+          risk_override: dangerous
+          required_claim: SOX_approval
+          audit_level: strict
+    energy:
+      tools:
+        terminal:
+          required_claim: SCADA_safety_certificate
+          audit_level: strict
+        shell_exec:
+          required_claim: SCADA_safety_certificate
+          audit_level: strict
+          data_classification: critical_infrastructure
+        write_file:
+          data_classification: operational_parameter
 sandbox:
   path_blacklist:
   - /etc/passwd

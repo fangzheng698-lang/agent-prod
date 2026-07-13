@@ -1,0 +1,19 @@
+# Prometheus scrape config for agent-prod
+# Used by Prometheus deployed alongside agent-prod (docker-compose).
+# Scrapes the embedded /metrics endpoint.
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: "agent-prod"
+    static_configs:
+      - targets: ["agent-prod:8000"]
+    metrics_path: /metrics
+    # If agent-prod is behind authentication, add authorization here.
+    # authorization:
+    #   credentials_file: /etc/prometheus/auth-token
+
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]
