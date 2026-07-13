@@ -14,6 +14,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from .models import GateName, GateResult, Improvement, RollbackLevel, RollbackPlan
+from .interface import GatePlugin, register_gate
 
 logger = logging.getLogger(__name__)
 
@@ -45,8 +46,6 @@ except ImportError:
 class TraceSpan:
     """极简 span 记录（不依赖 OTel SDK 也能工作）"""
 
-# Copyright (c) 2026 fang.zheng
-# License: MIT (see LICENSE file in root)
     def __init__(
         self,
         name: str,
@@ -291,7 +290,7 @@ class JaegerAPIClient:
     """
 
     def __init__(self, base_url: str = "http://localhost:16686",
-                 timeout_seconds: float = 5.0):
+                 timeout_seconds: float = 1.0):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout_seconds
         self._degraded = False
@@ -329,10 +328,8 @@ class JaegerAPIClient:
             return None
         except Exception as e:
             logger.warning("Jaeger API query failed: %s", e)
-            self._consecutive_failures = getattr(self, "_consecutive_failures", 0) + 1
-            if self._consecutive_failures >= 3:
-                self._degraded = True
-                logger.warning("JaegerAPIClient degraded after 3 failures")
+            # 连接/超时异常一次就 degrade，不再重复等待 timeout
+            self._degraded = True
             return None
 
     @staticmethod
@@ -441,14 +438,16 @@ class OtelCollectorClient:
     """
 
     def __init__(self, grpc_endpoint: str = "localhost:4317",
-                 timeout_seconds: float = 5.0):
+                 timeout_seconds: float = 0.5):
         self.grpc_endpoint = grpc_endpoint
         self.timeout = timeout_seconds
-        self._degraded = False
+        # 启动时一次性探活；失败后 degrade，后续 +query_spans 直接短路
+        self._degraded = not (self.health_check() if timeout_seconds > 0 else False)
 
     def health_check(self) -> bool:
         """检查 Collector 是否可达"""
         if not _GRPC_AVAILABLE:
+            self._degraded = True
             return False
         try:
             channel = grpc.insecure_channel(self.grpc_endpoint)
@@ -457,6 +456,7 @@ class OtelCollectorClient:
             )
             return True
         except Exception:
+            self._degraded = True  # 失败一次就 degrade，不再重复超时
             return False
 
     def query_spans(self, trace_id: str) -> dict[str, Any] | None:
@@ -475,8 +475,11 @@ class OtelCollectorClient:
 
 # ── Gate2 执行器 ────────────────────────────────────────────────
 
-class Gate2TraceIntegrity:
+class Gate2TraceIntegrity(GatePlugin):
     """轨迹完整性门 — Phase 1: 支持真实 Jaeger/OTel 数据源"""
+
+    name = GateName.GATE2
+    rollback_level = RollbackLevel.L1
 
     def __init__(self, use_otel: bool = False,
                  jaeger_url: str = "",
@@ -736,8 +739,10 @@ class Gate2TraceIntegrity:
             success=True,
         )
 
-# ── GatePlugin registration ──────────────────────────────
-from .interface import register_gate
+    @classmethod
+    def from_config(cls, config: dict, name: GateName) -> Gate2TraceIntegrity:
+        return cls.from_yaml(config)
 
+# ── GatePlugin registration ──────────────────────────────
 register_gate(GateName.GATE2, Gate2TraceIntegrity)
 

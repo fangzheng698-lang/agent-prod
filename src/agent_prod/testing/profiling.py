@@ -34,8 +34,6 @@ from typing import Any
 class ProfileRecord:
     """单次门执行记录"""
 
-# Copyright (c) 2026 fang.zheng
-# License: MIT (see LICENSE file in root)
 
     gate_name: str
     duration_ms: float

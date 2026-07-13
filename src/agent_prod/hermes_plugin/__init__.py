@@ -35,8 +35,6 @@ _engine_ref: Any = None  # cached engine with PostgresRepository for persistence
 def _ensure_gates_loaded() -> bool:
     """Lazy-import agent-prod gates. Result cached for process lifetime."""
 
-# Copyright (c) 2026 fang.zheng
-# License: MIT (see LICENSE file in root)
     global _gates_available
     if _gates_available is not None:
         return _gates_available

@@ -69,8 +69,6 @@ def to_agent_trace(
 ) -> dict[str, Any]:
     """
 
-# Copyright (c) 2026 fang.zheng
-# License: MIT (see LICENSE file in root)
     Construct an AgentTrace dict with sensible defaults.
 
     The caller provides only what they have. Missing fields get safe

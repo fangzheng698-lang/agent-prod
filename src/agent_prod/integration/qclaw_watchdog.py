@@ -69,6 +69,7 @@ class QClawWatchdog:
         agent_type: str = "qclaw",
         auto_approve_missing_human_approver: bool | None = None,
         auto_approver: str = "qclaw-auto",
+        max_known: int = 10_000,
     ):
         self.sessions_dir = sessions_dir
         self.agent_prod_url = agent_prod_url.rstrip("/")
@@ -82,6 +83,8 @@ class QClawWatchdog:
         )
         self.auto_approver = auto_approver
         self._known: set[str] = set()
+        self._max_known = max_known
+        self._failed: set[str] = set()  # files that failed parse — retry on next poll
         self._running = False
         self._submitted_count = 0
         self._error_count = 0
@@ -136,6 +139,15 @@ class QClawWatchdog:
         if not self.sessions_dir.exists():
             return 0
 
+        # Drop failed-parse entries each poll so they can be retried
+        # if the file gets rewritten/completed later. Bound _known to
+        # max_known to avoid unbounded growth across long-running watches.
+        if self._failed:
+            self._known -= self._failed
+            self._failed.clear()
+        if len(self._known) > self._max_known:
+            self._known = set(list(self._known)[-self._max_known:])
+
         new_count = 0
         for fpath in list_qclaw_sessions(str(self.sessions_dir)):
             if fpath.name in self._known:
@@ -157,6 +169,7 @@ class QClawWatchdog:
             if trace_data is None:
                 logger.warning("Failed to parse qclaw session: %s", fpath.name)
                 self._error_count += 1
+                self._failed.add(fpath.name)  # retry on next poll if file is rewritten
                 return
 
             if (

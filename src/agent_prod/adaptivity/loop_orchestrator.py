@@ -15,6 +15,7 @@ Execution → Attribution → Optimization → Release
 from __future__ import annotations
 
 import asyncio
+import logging
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -31,6 +32,8 @@ from agent_prod.testing.optimizer import analyze_logs, OptimizationSuggestion
 from agent_prod.testing.governance import GovernancePanel
 from agent_prod.testing.gate_stress import GateStressRunner, StressReport
 from agent_prod.lifecycle.loop_state import LoopStateMachine, LoopState, StateTransition
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -188,7 +191,7 @@ class LoopOrchestrator:
                         turn_dicts.append(td)
                     self._replay_recorder.record(run_id, turn_dicts, final_response=response_text)
                 except Exception:
-                    pass
+                    logger.warning("Replay recording failed for run %s", run_id, exc_info=True)
 
                 phases.append(CyclePhase(name="execution", duration_ms=(_time.monotonic()-t0)*1000,
                     success=gate_all_passed, data={"gate_status": gate_status, "tokens": total_tokens,
@@ -211,7 +214,7 @@ class LoopOrchestrator:
             self._flywheel.log_execution(run_id=run_id, session_id=session_id, prompt=prompt, response=response_text,
                 turns=total_turns, tokens=total_tokens, duration_ms=total_time_ms, gate_pass=gate_all_passed, gate_status=gate_status)
         except Exception:
-            pass
+            logger.warning("Execution logging failed for run %s", run_id, exc_info=True)
 
         # ════════════════════════════════════════════════════════
         # Phase 2: Attribution
@@ -287,7 +290,7 @@ class LoopOrchestrator:
                     cmp = compare_snapshots(prev_snap, current)
                     benchmark_improved = cmp.get("improved", False)
             except Exception:
-                pass
+                logger.warning("Benchmark snapshot save/compare failed for version %s", version, exc_info=True)
 
             if gate_all_passed:
                 # Replay verification before promote
@@ -297,7 +300,7 @@ class LoopOrchestrator:
                         if recorded:
                             replay_valid = recorded.turns is not None and len(recorded.turns) == len(turns)
                     except Exception:
-                        pass
+                        logger.warning("Replay verification failed for run %s", run_id, exc_info=True)
 
                 # Gate stress test — concurrent gate validation
                 stress_report = None
@@ -306,7 +309,7 @@ class LoopOrchestrator:
                         self.gateway, [turns] * 3 if turns else [[], [], []],
                     )
                 except Exception:
-                    pass
+                    logger.warning("Gate stress test failed for run %s", run_id, exc_info=True)
 
                 # State: VERIFYING -> VERIFIED
                 verification_passed = replay_valid is not False  # None is OK (no replay available)

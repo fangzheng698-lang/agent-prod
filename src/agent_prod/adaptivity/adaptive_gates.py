@@ -57,6 +57,11 @@ class AdaptiveThreshold(BaseModel):
     window_size: int = 50             # 滚动窗口大小
     min_samples: int = 10             # 最少样本数才校准
 
+    # 绝对值下限：当均值和标准差极低时，阈值带至少保持此宽度（半幅）。
+    # 单位与 metric 相同。0 表示不启用 floor（纯靠 σ 带）。
+    # 例如 latency_ms 取 500（ms）则 upper 至少 mean + 250ms，避免少量低延迟样本把上界压到 ~5ms。
+    min_width: float = 0.0
+
     # 运行时状态
     samples: deque[float] = Field(default_factory=deque)
     mean: float = 0.0
@@ -85,11 +90,17 @@ class AdaptiveThreshold(BaseModel):
 
     @property
     def upper(self) -> float:
-        return self.mean + self.sigma_mult * max(self.std, 0.1)
+        raw = self.mean + self.sigma_mult * max(self.std, 0.1)
+        if self.min_width > 0:
+            raw = max(raw, self.mean + self.min_width / 2)
+        return raw
 
     @property
     def lower(self) -> float:
-        return max(0, self.mean - self.sigma_mult * max(self.std, 0.1))
+        raw = self.mean - self.sigma_mult * max(self.std, 0.1)
+        if self.min_width > 0:
+            raw = min(raw, max(self.mean - self.min_width / 2, 0))
+        return max(0, raw)
 
     def calibrate(self):
         """基于当前窗口重新计算均值和标准差（批量校准）。"""
@@ -166,6 +177,7 @@ class AdaptiveGateEngine:
         sigma_mult: float = 2.0,
         min_samples: int = 10,
         alpha: float = 0.3,
+        min_widths: dict[str, float] | None = None,
     ):
         self.gate_name = gate_name
         self._thresholds: dict[str, AdaptiveThreshold] = {}
@@ -175,6 +187,7 @@ class AdaptiveGateEngine:
                 sigma_mult=sigma_mult,
                 window_size=window_size,
                 min_samples=min_samples,
+                min_width=(min_widths or {}).get(m, 0.0),
             )
 
     def record_metric(self, metric_name: str, value: float):

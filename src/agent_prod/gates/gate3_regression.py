@@ -15,6 +15,7 @@ from pydantic import BaseModel
 
 from .models import GateName, GateResult, Improvement, RollbackLevel, RollbackPlan
 from .reasoning import EvidenceSource, EvidenceType, ReasoningStep
+from .interface import GatePlugin
 
 logger = logging.getLogger(__name__)
 
@@ -29,8 +30,6 @@ except ImportError:
 class Regression(BaseModel):
     """单条回归检测结果"""
 
-# Copyright (c) 2026 fang.zheng
-# License: MIT (see LICENSE file in root)
     field: str
     old_value: Any = None
     new_value: Any = None
@@ -70,8 +69,11 @@ class Gate3Config(BaseModel):
                        if k in cls.model_fields})
 
 
-class Gate3Regression:
+class Gate3Regression(GatePlugin):
     """回归验证门 — DeepDiff 结构化对比 + 动态基线 + 自适应阈值"""
+
+    name = GateName.GATE3
+    rollback_level = RollbackLevel.L1
 
     def __init__(self, config: Gate3Config | None = None,
                  raw_config: dict | None = None,
@@ -388,6 +390,9 @@ class Gate3Regression:
         if adaptive_result:
             regressions.extend(adaptive_result)
 
+        # "越低越好" 指标前缀列表 — 例如 latency/error_rate 下降是优化，不是回归
+        _LOWER_IS_BETTER_PREFIXES = ("latency", "latency_p95_ms", "error_rate")
+
         for key in baseline:
             # 跳过内部元数据字段（_evolved_from, _evolved_at, _decisions 等）
             if key.startswith("_"):
@@ -405,8 +410,22 @@ class Gate3Regression:
                 regressions.append(Regression(field=key, change_type="missing", severity="critical"))
                 continue
             bv, cv = baseline[key], candidate[key]
-            if isinstance(bv, (int, float)) and isinstance(cv, (int, float)):
-                if bv > 0 and cv < bv * cfg.regress_pct:
+            if not (isinstance(bv, (int, float)) and isinstance(cv, (int, float)) and bv > 0):
+                continue
+
+            is_lower_better = any(key.startswith(p) for p in _LOWER_IS_BETTER_PREFIXES)
+            if is_lower_better:
+                # 越低越好：回归 = 候选值比基线更高（更差）
+                if cv > bv / cfg.regress_pct:
+                    regressions.append(Regression(
+                        field=key,
+                        old_value=bv, new_value=cv,
+                        change_type=f"degraded +{((cv - bv) / bv) * 100:+.0f}% above baseline",
+                        severity="critical",
+                    ))
+            else:
+                # 越高越好：回归 = 候选值比基线更低（更差）
+                if cv < bv * cfg.regress_pct:
                     regressions.append(Regression(
                         field=key,
                         old_value=bv, new_value=cv,
@@ -492,18 +511,49 @@ class Gate3Regression:
             gate_name="gate3",
             metrics=["latency_ms", "success_rate", "token_efficiency"],
             window_size=50, sigma_mult=3.0, min_samples=5,
+            min_widths={"latency_ms": 500.0},
         )
 
+        # 提取真实 candidate trace 指标（quality_gate_result.trace_metrics），
+        # 与 candidates 评估时读取的 candidate_output["latency_p95_ms"] 同源同量纲。
+        # 旧记录没有 trace_metrics 时跳过 — 不再用 pipeline 挂钟时间冒充 latency。
+        latencies = []
+        success_rates = []
+        token_effs = []
         for r in same_agent:
-            dur = r.duration_ms
-            tokens = (r.costs or {}).get("prompt_tokens", 0) + (r.costs or {}).get("completion_tokens", 0)
             qg = r.quality_gate_result or {}
-            if dur > 0:
-                self._adaptive_engine.record_metric("latency_ms", dur)
-            if tokens > 0:
-                self._adaptive_engine.record_metric("token_efficiency", tokens)
-            if qg.get("passed") is not None:
-                self._adaptive_engine.record_metric("success_rate", 1.0 if qg.get("passed") else 0.0)
+            tm = qg.get("trace_metrics") or {}
+            if not isinstance(tm, dict):
+                tm = {}
+            lat = tm.get("latency_p95_ms") or tm.get("latency_ms")
+            if isinstance(lat, (int, float)) and lat > 0:
+                latencies.append(float(lat))
+            sr = tm.get("success_rate")
+            if isinstance(sr, (int, float)) and 0 <= sr <= 1:
+                success_rates.append(float(sr))
+            te = tm.get("token_efficiency")
+            if isinstance(te, (int, float)) and te > 0:
+                token_effs.append(float(te))
+
+        # IQR 离群值过滤（仅对 latency — 跨数量级最容易污染）
+        def _iqr_filter(values: list[float]) -> list[float]:
+            if len(values) < 4:
+                return list(values)
+            s = sorted(values)
+            n = len(s)
+            q1 = s[n // 4]
+            q3 = s[(3 * n) // 4]
+            iqr = q3 - q1
+            lo, hi = q1 - 3.0 * iqr, q3 + 3.0 * iqr
+            return [v for v in values if lo <= v <= hi]
+
+        clean_latencies = _iqr_filter(latencies)
+        for v in clean_latencies:
+            self._adaptive_engine.record_metric("latency_ms", v)
+        for v in token_effs:
+            self._adaptive_engine.record_metric("token_efficiency", v)
+        for v in success_rates:
+            self._adaptive_engine.record_metric("success_rate", v)
 
         self._adaptive_engine.calibrate_all()
 
@@ -557,6 +607,12 @@ class Gate3Regression:
         )
         if improvement.baseline_output:
             improvement.candidate_output = improvement.baseline_output.copy()
+
+    @classmethod
+    def from_config(cls, config: dict, name: GateName) -> Gate3Regression:
+        gate3_cfg = Gate3Config.from_yaml(config)
+        repo = None  # caller sets repository if needed
+        return cls(config=gate3_cfg, raw_config=config, repository=repo)
 
 # ── GatePlugin registration ──────────────────────────────
 from .interface import register_gate

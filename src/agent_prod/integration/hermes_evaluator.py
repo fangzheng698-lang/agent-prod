@@ -43,8 +43,6 @@ def _build_decisions(
 ) -> list[dict[str, Any]]:
     """Convert Hermes message rows into AgentTrace Decision dicts.
 
-# Copyright (c) 2026 fang.zheng
-# License: MIT (see LICENSE file in root)
 
     Each assistant message with tool_calls becomes one Decision.
     Distributes session-level token counts across decisions so
@@ -195,6 +193,24 @@ def _build_trace_payload(
     # 合并：preloaded + runtime，去重
     all_skills = list(dict.fromkeys(loaded_skills + sorted(runtime_skill_ops)))
 
+    # ── 合并硬编码已知工具 + decisions 中动态检测到的工具 —─
+    # Gate0 需要 declared_tools 才不会拒掉 benign 工具；硬编码列表覆盖常见
+    # Hermes 工具，动态检测补充自定义工具。仅靠硬编码会漏掉自定义工具 → 误拒。
+    # 去重保序：硬编码在前，动态新增在后
+    _KNOWN_HERMES_TOOLS = [
+        "read_file", "search_files", "session_search",
+        "skills_list", "skill_view", "memory",
+        "vision_analyze", "browser_navigate", "browser_snapshot",
+        "browser_console", "browser_vision", "browser_get_images",
+        "browser_scroll", "browser_back", "web_search",
+        "process", "process_list", "process_poll", "process_log",
+        "todo", "write_file", "patch", "skill_manage",
+        "browser_click", "browser_type", "browser_press",
+        "terminal", "execute_code", "send_message",
+        "cronjob", "delegate_task", "clarify",
+    ]
+    declared_tools = list(dict.fromkeys(_KNOWN_HERMES_TOOLS + declared_tools))
+
     payload: dict[str, Any] = {
         "agent": "hermes",
         "version": "v0.3.0",
@@ -231,19 +247,6 @@ def _build_trace_payload(
             "evaluated_at": time.time(),
             "loaded_skills": all_skills,
         },
-        # Gate0 需要 declared_tools 才不会拒掉 benign 工具
-        "declared_tools": [
-            "read_file", "search_files", "session_search",
-            "skills_list", "skill_view", "memory",
-            "vision_analyze", "browser_navigate", "browser_snapshot",
-            "browser_console", "browser_vision", "browser_get_images",
-            "browser_scroll", "browser_back", "web_search",
-            "process", "process_list", "process_poll", "process_log",
-            "todo", "write_file", "patch", "skill_manage",
-            "browser_click", "browser_type", "browser_press",
-            "terminal", "execute_code", "send_message",
-            "cronjob", "delegate_task", "clarify",
-        ],
     }
 
     return payload

@@ -84,21 +84,36 @@ class AgentRuntime:
     ) -> tuple[list[dict], list[TurnRecord]]:
         """非流式执行。返回 (最终消息列表, 每轮记录)。"""
         msgs = list(messages)
-        self._turns = []
+        turns: list[TurnRecord] = []
+        async for turn, final_msgs in self._run_steps(msgs, turns):
+            turns.append(turn)
+            msgs = final_msgs
+        self._turns = turns
+        return msgs, turns
+
+    async def _run_steps(
+        self, msgs: list[dict], turn_accumulator: list[TurnRecord] | None = None
+    ) -> AsyncGenerator[tuple[TurnRecord, list[dict]], None]:
+        """异步产生每一轮的 turn 和最新的 msgs list。
+
+        run() 用它收集成 list；stream_run() 直接 yield turn。
+        真流式：每个 turn 完成立刻 yield，消费者立刻看到，无需等所有 turn 完成。
+        """
         tools_schema = self._tools.list_schemas()
+        prev_turns = turn_accumulator if turn_accumulator is not None else self._turns
 
         for turn_idx in range(self._max_turns):
             turn = TurnRecord(turn_idx)
             start = time.monotonic()
 
-            # ── 预算检查 ──
+            # ── 预算检查：基于传进来的 accumulator（不是 self._turns） ──
             total_tokens = sum(
                 t.response.tokens_prompt + t.response.tokens_completion
-                for t in self._turns if t.response
+                for t in prev_turns if t.response
             )
             if total_tokens > self._max_tokens:
                 turn.error = f"Token budget exceeded ({total_tokens} > {self._max_tokens})"
-                self._turns.append(turn)
+                yield turn, msgs
                 break
 
             # ── Step 1: LLM 调用 ──
@@ -107,7 +122,7 @@ class AgentRuntime:
                 turn.response = resp
             except Exception as e:
                 turn.error = str(e)
-                self._turns.append(turn)
+                yield turn, msgs
                 if self.on_error:
                     result = self.on_error(e, turn_idx)
                     if hasattr(result, '__await__'):
@@ -133,12 +148,12 @@ class AgentRuntime:
             # ── Step 2: 没有 tool call → 结束 ──
             if not resp.tool_calls:
                 turn.duration_ms = (time.monotonic() - start) * 1000
-                self._turns.append(turn)
                 self.total_turns += 1
                 if self.on_turn:
                     result = self.on_turn(turn)
                     if hasattr(result, '__await__'):
                         await result
+                yield turn, msgs
                 break
 
             # ── Step 3: 执行工具 ──
@@ -151,13 +166,14 @@ class AgentRuntime:
                 })
 
             turn.duration_ms = (time.monotonic() - start) * 1000
-            self._turns.append(turn)
             self.total_turns += 1
 
             if self.on_turn:
                 result = self.on_turn(turn)
                 if hasattr(result, '__await__'):
                     await result
+
+            yield turn, msgs
 
             # Phase 4.1: 预算检查
             if self._budget and turn.response:
@@ -166,24 +182,27 @@ class AgentRuntime:
                 try:
                     self._budget.raise_if_exceeded(turn_tokens, turn_time)
                 except BudgetExceeded as e:
-                    self._turns[-1].error = str(e)
-                    if self._turns[-1].response:
-                        self._turns[-1].response.finish_reason = "budget"
+                    turn.error = str(e)
+                    if turn.response:
+                        turn.response.finish_reason = "budget"
                     break
 
         else:
-            if self._turns:
-                self._turns[-1].error = f"Max turns ({self._max_turns}) reached"
-
-        return msgs, list(self._turns)
+            if prev_turns:
+                prev_turns[-1].error = f"Max turns ({self._max_turns}) reached"
 
     async def stream_run(
         self, messages: list[dict]
     ) -> AsyncGenerator[TurnRecord, None]:
-        """Phase 8.1: 流式执行 — 内部调用 run()，每轮逐个 yield。
+        """真流式执行 — 每个 turn 完成立刻 yield，不等所有 turn 跑完。
 
-        先完整执行，再流式 yield turns。
+        Phase 8.1: 之前是先 await run() 再 yield list（伪流式），
+        现在改为 _run_steps() 直接 yield，消费者边收边显示。
+        每个 stream_run 调用维护自己的 turns 累加器，预算基于本次
+        实际产生过的 turn 而不是 self._turns（避免跨调用 stale 读）。
         """
-        _, turns = await self.run(messages)
-        for turn in turns:
+        msgs = list(messages)
+        local_turns: list[TurnRecord] = []
+        async for turn, _final_msgs in self._run_steps(msgs, local_turns):
+            local_turns.append(turn)
             yield turn

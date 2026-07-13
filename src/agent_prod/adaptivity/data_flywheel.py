@@ -313,9 +313,13 @@ class FlywheelReport(BaseModel):
 class FlywheelEngine:
     """数据飞轮引擎：记录 → 基线 → 趋势 → 显著性 → 建议。"""
 
-    def __init__(self, log_path: str):
+    def __init__(self, log_path: str, memory_cap: int = 10_000):
         self._log_path = log_path
+        # Cap in-memory log buffer so long-running :memory: engines don't leak.
+        # _load_logs already returns the last `limit=500`, so trimming the oldest
+        # entries beyond this cap does not affect reports/baselines.
         self._memory_logs: list[ExecutionLogRecord] = []
+        self._memory_cap = memory_cap
         if log_path != ":memory:":
             os.makedirs(os.path.dirname(self._log_path) or ".", exist_ok=True)
 
@@ -330,8 +334,19 @@ class FlywheelEngine:
         duration_ms: float,
         gate_pass: bool,
         gate_status: str,
+        trace_metrics: dict | None = None,
     ):
-        """记录一次执行。"""
+        """记录一次执行。
+
+        trace_metrics: 候选 trace 提供的实际指标，例如
+            {"latency_p95_ms": ..., "success_rate": ..., "token_efficiency": ...}
+            存进 quality_gate_result 里，供 Gate3 自适应训练读取，
+            避免用 pipeline 挂钟时间 (duration_ms) 当 latency 基线
+            与候选拿到的真实 trace latency 比较。
+        """
+        qgr = {"status": gate_status, "passed": gate_pass}
+        if trace_metrics:
+            qgr["trace_metrics"] = trace_metrics
         record = ExecutionLogRecord(
             run_id=run_id,
             session_id=session_id,
@@ -340,10 +355,12 @@ class FlywheelEngine:
             turns=turns,
             costs={"prompt_tokens": tokens // 2, "completion_tokens": tokens - tokens // 2},
             duration_ms=duration_ms,
-            quality_gate_result={"status": gate_status, "passed": gate_pass},
+            quality_gate_result=qgr,
         )
         if self._log_path == ":memory:":
             self._memory_logs.append(record)
+            if len(self._memory_logs) > self._memory_cap:
+                self._memory_logs = self._memory_logs[-self._memory_cap:]
             return
 
         with open(self._log_path, "a") as f:

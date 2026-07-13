@@ -53,12 +53,57 @@ class ExecutionLogger:
     线程安全：单线程 Runtime 执行，无需锁。
     """
 
-    def __init__(self, file_path: str = "data/execution_log.jsonl"):
+    def __init__(self, file_path: str = "data/execution_log.jsonl",
+                 max_bytes: int = 50 * 1024 * 1024, backup_count: int = 1):
+        """JSONL execution logger.
+
+        Args:
+            file_path: target JSONL path.
+            max_bytes: rotate when the active file exceeds this size.
+            backup_count: number of rotated `.1`, `.2` ... backups to keep.
+                Set to 0 to disable rotation (unbounded growth — not recommended
+                for long-running进程).
+        """
         self._file_path = Path(file_path)
         self._file_path.parent.mkdir(parents=True, exist_ok=True)
+        self._max_bytes = max_bytes
+        self._backup_count = backup_count
+
+    def _maybe_rotate(self) -> None:
+        """Size-based rotation — keeps the JSONL file bounded.
+
+        Append-only log files grow forever; without rotation the disk fills
+        up over weeks. We rotate based on file size, keeping up to
+        `backup_count` older copies named `<file>.1`, `<file>.2`, ...
+        """
+        if self._backup_count <= 0 or not self._file_path.exists():
+            return
+        try:
+            size = self._file_path.stat().st_size
+        except OSError:
+            return
+        if size < self._max_bytes:
+            return
+        # Shift existing backups: .2 -> .3, .1 -> .2, current -> .1
+        for i in range(self._backup_count, 0, -1):
+            src = self._file_path.with_suffix(f"{self._file_path.suffix}.{i}")
+            if i == self._backup_count:
+                src.unlink(missing_ok=True)  # discard oldest
+            else:
+                prev = self._file_path.with_suffix(f"{self._file_path.suffix}.{i + 1}")
+                try:
+                    src.rename(prev)
+                except OSError:
+                    pass
+        dest = self._file_path.with_suffix(f"{self._file_path.suffix}.1")
+        try:
+            self._file_path.rename(dest)
+        except OSError:
+            pass
 
     def log_execution(self, record: ExecutionLogRecord) -> None:
         """追加一条执行记录到 JSONL 文件。"""
+        self._maybe_rotate()
         line = record.model_dump_json()
         with open(self._file_path, "a") as f:
             f.write(line + "\n")

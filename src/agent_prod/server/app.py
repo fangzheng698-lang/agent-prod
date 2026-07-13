@@ -226,12 +226,24 @@ async def add_deprecation_headers(request: Request, call_next):
 
 
 # CORS
+# allow_origins=["*"] + allow_credentials=True is forbidden by the CORS
+# spec (and ignored by browsers, which refuse to send credentials for a
+# wildcard origin). Default to no credentials + wildcard for unauthenticated
+# embedded mode; opt into a real origin list + credentials via env:
+#   AGENT_PROD_CORS_ORIGINS=https://app.example.com,https://staging.example.com
+_cors_origins_raw = os.environ.get("AGENT_PROD_CORS_ORIGINS", "").strip()
+if _cors_origins_raw:
+    _cors_origins = [o.strip() for o in _cors_origins_raw.split(",") if o.strip()]
+    _cors_credentials = True
+else:
+    _cors_origins = ["*"]
+    _cors_credentials = False  # wildcard + credentials is a spec violation
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=_cors_origins,
+    allow_credentials=_cors_credentials,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Api-Key", "X-Request-Id"],
 )
 
 # Security
@@ -240,7 +252,8 @@ from agent_prod.server.security import (
     rate_limit_middleware_factory,
 )
 if settings.auth_required and settings.api_key:
-    app.middleware("http")(auth_middleware_factory(api_key=settings.api_key))
+    app.middleware("http")(auth_middleware_factory(
+        api_key=settings.api_key, auth_required=settings.auth_required))
 elif settings.auth_required and not settings.api_key:
     logger.warning("auth_required=True but no api_key configured — auth DISABLED. Set AGENT_PROD_API_KEY or api_key in .env")
 if settings.rate_limit_enabled:
@@ -1647,8 +1660,8 @@ async def _run_gate0_preflight(
         }
 
     except Exception as e:
-        logger.warning("Gate0 preflight error: %s", e)
-        return {"blocked": False, "reason": f"Gate0 error (passthrough): {e}", "details": {}}
+        logger.error("Gate0 preflight error, blocking fail-closed: %s", e, exc_info=True)
+        return {"blocked": True, "reason": f"Gate0 internal error, blocked fail-closed: {type(e).__name__}: {e}", "details": {}}
 
 
 @app.post("/v1/proxy/chat/completions")
@@ -1739,17 +1752,21 @@ async def proxy_chat_completions(payload: dict = Body(...)):  # noqa: B008
         forward_body["stream"] = True
 
     try:
-        resp = await llm._client.post("/chat/completions", json=forward_body)
+        # llm._client 已无默认 Authorization header（防 traceback 泄露）；
+        # 显式传 auth，复用 llm 实例里存的 api_key
+        upstream_auth = _httpx.BearerAuth(llm._api_key)
+        resp = await llm._client.post("/chat/completions", json=forward_body, auth=upstream_auth)
         resp.raise_for_status()
     except _httpx.HTTPStatusError as e:
-        logger.error("Proxy upstream error: %s", e)
+        _rbody = (e.response.text or "")[:200]
+        logger.error("Proxy upstream error: status=%s body=%s", e.response.status_code, _rbody)
         raise HTTPException(
             e.response.status_code,
-            detail=f"Upstream LLM error: {e.response.text[:500]}",
+            detail=f"Upstream LLM error (status {e.response.status_code}); see server logs.",
         ) from e
     except Exception as e:
         logger.error("Proxy connection error: %s", e)
-        raise HTTPException(502, f"Upstream connection failed: {e}") from e
+        raise HTTPException(502, f"Upstream connection failed: {type(e).__name__}") from e
 
     # ── 5. Extract response data for session accumulation ──
     raw = resp.json()
@@ -1885,13 +1902,16 @@ async def proxy_anthropic_messages(payload: dict = Body(...)):  # noqa: B008
     openai_body.pop("stream", None)
 
     try:
-        resp = await llm._client.post("/chat/completions", json=openai_body)
+        upstream_auth = _httpx.BearerAuth(llm._api_key)
+        resp = await llm._client.post("/chat/completions", json=openai_body, auth=upstream_auth)
         resp.raise_for_status()
     except _httpx.HTTPStatusError as e:
-        logger.error("Proxy upstream error (anthropic): %s", e)
+        _rbody = (e.response.text or "")[:200]
+        logger.error("Proxy upstream error (anthropic): status=%s body=%s",
+                     e.response.status_code, _rbody)
         raise HTTPException(
             e.response.status_code,
-            detail=f"Upstream LLM error: {e.response.text[:500]}",
+            detail=f"Upstream LLM error (status {e.response.status_code}); see server logs.",
         ) from e
     except Exception as e:
         logger.error("Proxy connection error (anthropic): %s", e)

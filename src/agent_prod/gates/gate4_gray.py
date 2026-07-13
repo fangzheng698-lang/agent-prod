@@ -21,6 +21,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from .models import GateName, GateResult, Improvement, RollbackLevel, RollbackPlan
+from .interface import GatePlugin
 
 logger = logging.getLogger(__name__)
 
@@ -56,8 +57,6 @@ class GrayReport(BaseModel):
 class FlagEngine(ABC):
     """Feature Flag 抽象接口 — 生产 / 本地统一 API"""
 
-# Copyright (c) 2026 fang.zheng
-# License: MIT (see LICENSE file in root)
 
     @abstractmethod
     def get_variant(self, improvement_id: str, user_id: str = "") -> str:
@@ -444,8 +443,11 @@ class GrayStateTracker:
         self._states.pop(improvement_id, None)
 
 
-class Gate4GrayRelease:
+class Gate4GrayRelease(GatePlugin):
     """灰度放行门 — 阶梯状态机 + 可插拔指标源"""
+
+    name = GateName.GATE4
+    rollback_level = RollbackLevel.L4
 
     _gray_tracker: GrayStateTracker | None = None
 
@@ -729,6 +731,10 @@ class Gate4GrayRelease:
 
         # 清理 flag 文件
         FileFlagEngine().remove(improvement.id)
+
+    @classmethod
+    def from_config(cls, config: dict, name: GateName) -> Gate4GrayRelease:
+        return cls(config=Gate4Config.from_yaml(config), raw_config=config)
 
 
 # ── Demo 指标提供者（兼容原有随机逻辑） ─────────────────────────

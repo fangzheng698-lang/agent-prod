@@ -28,22 +28,26 @@ import time
 import uuid
 from typing import Any
 
-from .models import GateName, GateResult, Improvement
+from .models import GateName, GateResult, Improvement, RollbackLevel
 from .reasoning import EvidenceSource, EvidenceType, ReasoningStep
 from .tool_risk import RiskLevel, auto_classify_tool, get_risk, is_known_tool
 from .argument_inspection import check_tool_call, ThreatLevel
 from .intent_classifier import rule_based_classify
 from .domain_policy import DomainPolicyEngine, ViolationType
 from .trust_chain import TrustChainValidator, TrustLevel, TaskACL
+from .interface import GatePlugin
 
 logger = logging.getLogger(__name__)
 
 
-class Gate0Permission:
+class Gate0Permission(GatePlugin):
     """风险分级权限准入门。
 
     从 config.yaml gate0 段加载 auth_grant_store 和阈值配置。
     """
+
+    name = GateName.GATE0
+    rollback_level = RollbackLevel.L1
 
     def __init__(self, config: dict | None = None, auth_store=None,
                  domain_policy: DomainPolicyEngine | None = None,
@@ -588,3 +592,19 @@ class Gate0Permission:
 
         result["allowed"] = True
         return result
+
+    # ── GatePlugin ABC ───────────────────────────────────────
+
+    def rollback(self, improvement: Improvement) -> None:
+        """L1 rollback: clear auth tokens linked to this improvement."""
+        improvement.metadata.pop("auth_grant_id", None)
+
+    @classmethod
+    def from_config(cls, config: dict, name: GateName) -> Gate0Permission:
+        return cls(config=config)
+
+
+# ── Register as a GatePlugin ───────────────────────────
+from .interface import register_gate
+
+register_gate(GateName.GATE0, Gate0Permission)

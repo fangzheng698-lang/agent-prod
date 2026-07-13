@@ -25,8 +25,6 @@ from .models import (
 class AgentTraceAdapter(ABC):
     """
 
-# Copyright (c) 2026 fang.zheng
-# License: MIT (see LICENSE file in root)
     将 AgentTrace 映射为门禁引擎所需的 Improvement。
 
     子类实现 to_improvement()，处理 agent 特有的字段映射逻辑。
@@ -171,6 +169,13 @@ class GenericAdapter(AgentTraceAdapter):
         candidate["tools_used"] = trace.all_tool_names()
         candidate["token_count"] = trace.total_tokens()
 
+        # 动态 budget：按实际执行时间/token兜底，避免用静态 120s/100k 误拒长会话。
+        # 回填场景已有 actual_time_ms / total_tokens，这里给 actual * 2 (至少 default) 作为 budget。
+        actual_time = int(trace.total_time_ms())
+        actual_tokens = trace.total_tokens()
+        dynamic_budget_time = max(trace.budget_time_ms, actual_time * 2, 120_000)
+        dynamic_budget_tokens = max(trace.budget_tokens, int(actual_tokens * 2), 100_000)
+
         return Improvement(
             id=f"imp-{trace.session_id}",
             name=trace.session_id,
@@ -179,10 +184,10 @@ class GenericAdapter(AgentTraceAdapter):
             candidate_output=candidate,
             llm_calls=llm_calls,
             tool_calls=tool_calls,
-            actual_tokens=trace.total_tokens(),
-            actual_time_ms=int(trace.total_time_ms()),
-            budget_tokens=trace.budget_tokens,
-            budget_time_ms=trace.budget_time_ms,
+            actual_tokens=actual_tokens,
+            actual_time_ms=actual_time,
+            budget_tokens=dynamic_budget_tokens,
+            budget_time_ms=dynamic_budget_time,
             trace_id=trace.trace_id,
             human_approver=trace.human_approver,
             traffic_percentage=(

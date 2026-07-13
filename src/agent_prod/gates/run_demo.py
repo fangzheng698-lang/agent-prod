@@ -212,5 +212,3 @@ def run_demo():
 if __name__ == "__main__":
     success = run_demo()
     sys.exit(0 if success else 1)
-# Copyright (c) 2026 fang.zheng
-# License: MIT (see LICENSE file in root)

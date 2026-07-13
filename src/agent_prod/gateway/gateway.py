@@ -27,8 +27,6 @@ _PKG_ROOT = Path(__file__).resolve().parent.parent
 def _serialize_decisions(decisions: list) -> list[dict]:
     """将 AgentTrace Decision 列表序列化为 dict，供 Gate0 权限检查使用。
 
-# Copyright (c) 2026 fang.zheng
-# License: MIT (see LICENSE file in root)
 
     gate0_permission 需要: decisions[i]["tool_calls"][j]["tool_name"]
     """
@@ -85,10 +83,19 @@ class QualityGateGateway:
 
     @classmethod
     def memory(cls) -> QualityGateGateway:
-        """快速创建内存模式网关（无基础设施依赖，但加载默认阈值配置）。"""
+        """快速创建内存模式网关。
+
+        Note: "memory" 指零外部基础设施依赖，但评估结果仍会持久化到
+        data/improvements.json（FileRepository）。重启不丢数据。
+        """
+        from pathlib import Path
         from agent_prod.gates.engine import load_config
+        from agent_prod.gates.repository import FileRepository
         config = load_config()  # loads default config.yaml with per-agent thresholds
-        engine = QualityGateEngine(config=config, repository=None)
+        # 默认持久化路径：项目 data 目录下的 improvements.json
+        repo_path = Path("data") / "improvements.json"
+        repo = FileRepository(str(repo_path))
+        engine = QualityGateEngine(config=config, repository=repo)
         return cls(engine)
 
     @property
@@ -211,12 +218,22 @@ class QualityGateGateway:
 
         try:
             # run_pipeline 在 ThreadPoolExecutor 中运行各道门的超时保护，
-            # persist=False 避免 pipeline 内部调用 async save
-            result: Improvement = await asyncio.to_thread(
-                self._engine.run_pipeline,
-                improvement,
-                human_approver="agent-prod-api",
-                persist=False,
+            # persist=False 避免 pipeline 内部调用 async save。
+            # 外层 asyncio.wait_for 防止 _pool_executor worker 卡死，把整个
+            # event-loop 调用方也卡住（engine 内 pipeline_timeout=180s 仅
+            # 唤醒自身 future，event-loop 的 to_thread 协程仍在等）。
+            engine = self._engine
+            pipeline_timeout = float(engine.config.get("pipeline_timeout_seconds", 180.0))
+            # 外层略宽松，给 engine 内部的 pipeline_timeout 先触发留余量
+            outer_timeout = pipeline_timeout + 5.0
+            result: Improvement = await asyncio.wait_for(
+                asyncio.to_thread(
+                    engine.run_pipeline,
+                    improvement,
+                    human_approver="agent-prod-api",
+                    persist=False,
+                ),
+                timeout=outer_timeout,
             )
 
             # 异步安全持久化
@@ -335,11 +352,20 @@ class QualityGateGateway:
         improvement.metadata["auth_grant_id"] = getattr(trace, "auth_grant_id", "")
 
         try:
-            result: Improvement = await asyncio.to_thread(
-                self._engine.run_pipeline,
-                improvement,
-                human_approver=trace.human_approver or "external-agent",
-                persist=False,
+            # 外层 asyncio.wait_for 守护 engine 内 ThreadPoolExecutor：若 worker
+            # 长期不返回（engine 内 future 断但实际线程卡住），外层依然能在
+            # outer_timeout 后取消 to_thread 协程，让 event-loop 调用方及时返回。
+            engine = self._engine
+            pipeline_timeout = float(engine.config.get("pipeline_timeout_seconds", 180.0))
+            outer_timeout = pipeline_timeout + 5.0
+            result: Improvement = await asyncio.wait_for(
+                asyncio.to_thread(
+                    engine.run_pipeline,
+                    improvement,
+                    human_approver=trace.human_approver or "external-agent",
+                    persist=False,
+                ),
+                timeout=outer_timeout,
             )
 
             save_fn = self._engine.repository.save
