@@ -332,7 +332,7 @@ docker compose up -d  # Postgres + agent-prod + MCP
 |---|---|
 | 217 条真实会话 | 在 Hermes traces 上验证通过 |
 | 4,345 次工具调用 | 全路径工具风险 + 轨迹完整性 |
-| 219 个测试 | CI 全绿 |
+| 221 个测试 | CI 全绿 |
 | 自评估报告 | [docs/DOGFOOD_REPORT.md](docs/DOGFOOD_REPORT.md) — 70% 通过率 |
 
 ## 从这里开始

@@ -348,7 +348,7 @@ no framework fork. Add a gate, register it, and `from_yaml()` picks it up.
 |---|---|
 | 217 real agent sessions | Validated against Hermes traces |
 | 4,345 tool calls | Exercised tool-risk and trace-integrity paths |
-| 219 tests | CI passes without warnings |
+| 221 tests | CI passes without warnings |
 | Dogfood report | [docs/DOGFOOD_REPORT.md](docs/DOGFOOD_REPORT.md) — self-evaluation with 70% pass rate |
 
 ## Why Not Just an Eval Framework?
