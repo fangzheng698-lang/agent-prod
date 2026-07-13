@@ -232,6 +232,23 @@ curl -X POST http://localhost:8080/v1/approvals/$APPROVAL_ID/decide \
 Approval records are idempotent — deciding twice raises `ValueError`. Records
 auto-expire after a configurable TTL (default 24h).
 
+### CLI
+
+```bash
+agent-prod approval list                       # list pending approvals
+agent-prod approval list --agent qclaw         # filter by agent
+agent-prod approval list --status pending      # filter by status
+agent-prod approval approve <id> --approver alice --reason "LGTM"
+agent-prod approval reject <id> --approver bob
+```
+
+### Server-restart rehydration
+
+The in-memory `ApprovalQueue` is lost on server restart, but Improvement
+records with `status=PENDING_APPROVAL` persist in the repository. On startup,
+the server scans the repository for pending approvals and re-registers them in
+the queue — so callbacks received after a restart still resume the pipeline.
+
 ## Domain Policy Engine — Phase 2
 
 Industry-specific risk escalation at Gate0. The base tool risk is *only

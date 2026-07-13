@@ -996,3 +996,77 @@ class QualityGateEngine:
             _degraded_gauge.set(1 if self._gate1_is_degraded() else 0)
 
         return imp
+
+    # ══════════════════════════════════════════════════════════
+    #  Phase 3: 启动时回填挂起的审批
+    # ══════════════════════════════════════════════════════════
+
+    def rehydrate_pending_approvals(self) -> int:
+        """Re-register pending approvals from the repository into the queue.
+
+        After a server restart, the in-memory `ApprovalQueue` is empty even
+        though Improvement records with status=PENDING_APPROVAL still exist
+        in the persistent repository. This scans the repository for such
+        records and re-creates the corresponding ApprovalRecord entries so
+        `resume_after_approval` can find them via `approval_queue.get()`.
+
+        Returns the number of approvals re-registered.
+        """
+        try:
+            pending = self.repository.list(
+                status=ImprovementStatus.PENDING_APPROVAL.value,
+                limit=1000,
+            )
+        except Exception as e:
+            logger.warning("rehydrate_pending_approvals: list failed: %s", e)
+            return 0
+
+        count = 0
+        for imp in pending or []:
+            # Skip if a record already exists for this improvement
+            existing = self.approval_queue.get_by_improvement(imp.id)
+            if existing:
+                continue
+
+            # Reconstruct remaining gates from the improvement's gate_results.
+            # Gate5 verified → pending state means gate6/gate7 are still pending.
+            completed = {r.gate_name.value if hasattr(r.gate_name, "value") else str(r.gate_name)
+                         for r in imp.gate_results if r.passed}
+            remaining_names = [
+                g for g in ("gate6_answer_quality",
+                            "gate7_execution_consistency")
+                if g not in completed
+            ]
+            if not remaining_names:
+                # Nothing to resume — promote or reject conservatively.
+                # Don't auto-promote; require external decision.
+                logger.info(
+                    "Pending approval %s has no remaining gates; "
+                    "leaving in pending state for explicit decision.",
+                    imp.id,
+                )
+                remaining_names = []
+
+            try:
+                self.approval_queue.request(
+                    imp,
+                    remaining_gates=remaining_names,
+                    requested_by=imp.metadata.get("agent", "system"),
+                    webhook_url=imp.metadata.get("approval_webhook_url"),
+                    metadata={
+                        "domain": imp.metadata.get("domain", ""),
+                        "agent": imp.metadata.get("agent", ""),
+                        "rehydrated": True,
+                    },
+                )
+                count += 1
+            except Exception as e:
+                logger.warning(
+                    "rehydrate: failed to re-register approval for %s: %s",
+                    imp.id, e,
+                )
+
+        if count:
+            logger.info("Rehydrated %d pending approval(s) from repository", count)
+        return count
+

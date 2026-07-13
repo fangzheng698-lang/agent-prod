@@ -404,6 +404,93 @@ def cmd_alert(args: argparse.Namespace) -> None:
     """Configure alerting for gate rejections."""
 
 
+# ── Approval commands (Phase 3) ────────────────────────────────────
+
+def cmd_approval_list(args: argparse.Namespace) -> None:
+    """List approval records from the running server."""
+    import urllib.request
+    import urllib.error
+
+    base = _live_server()
+    qs = []
+    if args.agent:
+        qs.append(f"agent={args.agent}")
+    if args.status:
+        qs.append(f"status={args.status}")
+    url = f"{base}/v1/approvals" + ("?" + "&".join(qs) if qs else "")
+
+    try:
+        with urllib.request.urlopen(url, timeout=10) as resp:
+            payload = json.loads(resp.read())
+    except urllib.error.URLError as e:
+        print(f"Error: cannot reach server ({e})")
+        sys.exit(1)
+
+    records = payload.get("approvals", []) if isinstance(payload, dict) else payload
+    if not records:
+        print("No approval records found.")
+        return
+
+    print(f"Approval records ({len(records)}):")
+    print()
+    for r in records:
+        status = r.get("status", "?")
+        age = r.get("age_seconds")
+        age_str = f"  age={int(age)}s" if age is not None else ""
+        print(f"  [{status}] {r.get('approval_id', '?')}")
+        print(f"    agent: {r.get('agent', '?')}  improvement: {r.get('improvement_id', '?')}")
+        print(f"    gate: {r.get('gate', '?')}  requested: {r.get('requested_at', '?')}{age_str}")
+        if r.get("decided_by"):
+            print(f"    decided_by: {r.get('decided_by')}  reason: {r.get('decision_reason', '')}")
+        print()
+
+
+def cmd_approval_decide(args: argparse.Namespace, approved: bool) -> None:
+    """Approve or reject a pending approval and resume the pipeline."""
+    import urllib.request
+    import urllib.error
+
+    base = _live_server()
+    url = f"{base}/v1/approvals/{args.approval_id}/decide"
+    body = {
+        "approved": approved,
+        "approver": args.approver,
+        "reason": args.reason or "",
+    }
+    data = json.dumps(body).encode("utf-8")
+    req = urllib.request.Request(
+        url, data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            result = json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        body_text = e.read().decode("utf-8", errors="replace")
+        print(f"HTTP {e.code}: {body_text}")
+        sys.exit(1)
+    except urllib.error.URLError as e:
+        print(f"Error: cannot reach server ({e})")
+        sys.exit(1)
+
+    status = result.get("status", "?")
+    approved_flag = result.get("approved", approved)
+    improvement_id = result.get("improvement_id", "")
+    verb = "Approved" if approved else "Rejected"
+    icon = "✅" if (approved_flag and status == "production") else ("❌" if not approved else "⚠️")
+    print(f"\n{icon}  {verb}: approval={args.approval_id} improvement={improvement_id}")
+    print(f"    status={status}")
+
+
+def cmd_approval_approve(args: argparse.Namespace) -> None:
+    cmd_approval_decide(args, approved=True)
+
+
+def cmd_approval_reject(args: argparse.Namespace) -> None:
+    cmd_approval_decide(args, approved=False)
+
+
 # ── Registry commands ──────────────────────────────────────────────
 
 def cmd_registry_publish(args: argparse.Namespace) -> None:
@@ -593,6 +680,28 @@ def main(argv: list[str] | None = None) -> None:
     alert_parser.add_argument("--on", choices=["gate3", "gate6", "gate7", "any"], default="any",
                                help="Which gate rejections trigger alerts (default: any)")
     alert_parser.set_defaults(func=cmd_alert)
+
+    # ── approval ──
+    approval_parser = sub.add_parser("approval", help="Manage Gate5 pending approval requests")
+    approval_sub = approval_parser.add_subparsers(dest="approval_command")
+
+    appr_list = approval_sub.add_parser("list", help="List approval records")
+    appr_list.add_argument("--agent", help="Filter by agent name")
+    appr_list.add_argument("--status", choices=["pending", "approved", "rejected", "expired"],
+                            default="pending", help="Filter by status (default: pending)")
+    appr_list.set_defaults(func=cmd_approval_list)
+
+    appr_approve = approval_sub.add_parser("approve", help="Approve a pending request and resume the pipeline")
+    appr_approve.add_argument("approval_id", help="Approval ID")
+    appr_approve.add_argument("--approver", required=True, help="Name of the approver")
+    appr_approve.add_argument("--reason", default="", help="Optional reason")
+    appr_approve.set_defaults(func=cmd_approval_approve)
+
+    appr_reject = approval_sub.add_parser("reject", help="Reject a pending request")
+    appr_reject.add_argument("approval_id", help="Approval ID")
+    appr_reject.add_argument("--approver", required=True, help="Name of the approver")
+    appr_reject.add_argument("--reason", default="", help="Optional reason")
+    appr_reject.set_defaults(func=cmd_approval_reject)
 
     # ── registry ──
     registry_parser = sub.add_parser("registry", help="MCP server registry operations")

@@ -203,6 +203,23 @@ curl -X POST http://localhost:8080/v1/approvals/$APPROVAL_ID/decide \
 
 审批记录是幂等的——重复决策会抛出 `ValueError`。记录在可配置的 TTL 后自动过期（默认 24 小时）。
 
+### CLI
+
+```bash
+agent-prod approval list                       # 列出待审记录
+agent-prod approval list --agent qclaw         # 按 agent 过滤
+agent-prod approval list --status pending      # 按状态过滤
+agent-prod approval approve <id> --approver alice --reason "通过"
+agent-prod approval reject <id> --approver bob
+```
+
+### 服务重启后回填
+
+内存中的 `ApprovalQueue` 在 server 重启时会丢失，但 `Improvement`
+记录（`status=PENDING_APPROVAL`）持久化在 repository 中。Server 启动时
+扫描 repository，将挂起的审批记录重建到队列中——重启后收到的回调仍能
+恢复管线。
+
 ## 行业域策略引擎（Phase 2）
 
 在 Gate0 实现行业维度的风险升级。基础工具风险在受监管行业中**只能升不能降**。

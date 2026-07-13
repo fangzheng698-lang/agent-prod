@@ -149,6 +149,8 @@ async def lifespan(_app: FastAPI):
     """Manage background startup tasks and local resources."""
     await _startup_watchdog()
     await _start_proxy_subsystems()
+    # Phase 3: re-register pending approvals from repository
+    _rehydrate_pending()
     try:
         yield
     finally:
@@ -187,6 +189,24 @@ async def _startup_watchdog():
     # Read port from uvicorn config or default
     port = int(os.environ.get("AGENT_PROD_PORT", "8000"))
     _start_watchdog_thread(port)
+
+
+def _rehydrate_pending() -> None:
+    """Phase 3: re-register pending approvals from the persistent repository.
+
+    The in-memory ApprovalQueue is lost on server restart, but Improvement
+    records with status=PENDING_APPROVAL persist in the repository. This call
+    re-creates the queue entries so external callbacks can resume.
+    """
+    if not gateway:
+        return
+    try:
+        n = gateway.engine.rehydrate_pending_approvals()
+        if n:
+            logger.info("Rehydrated %d pending approval(s) on startup", n)
+    except Exception as e:
+        logger.warning("Rehydrate pending approvals failed: %s", e)
+
 
 # ── API Versioning Middleware ─────────────────────────────────
 # /v1/ 路由已标记为 deprecated，客户端应在 2026-09-01 前迁移到 /v2/
