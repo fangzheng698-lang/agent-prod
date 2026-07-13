@@ -148,6 +148,38 @@ class TestGate3Regression:
         # We just verify it doesn't crash
         assert result.gate_name == GateName.GATE3
 
+    def test_latency_improvement_not_regression(self, gate3):
+        """Latency goes DOWN (faster) — should NOT be flagged as regression."""
+        imp = Improvement(
+            name="test", id="imp-test-lat-improve",
+            baseline_output={"latency_p95_ms": 500.0},
+            candidate_output={"final_response": "hi", "latency_p95_ms": 200.0},
+            metadata={"agent": "hermes"},
+        )
+        result = gate3.verify(imp)
+        assert result.passed, (
+            f"Latency 500→200 (faster) should NOT be regression: {result.reason}"
+        )
+
+    def test_latency_regression_detected(self, gate3):
+        """Latency goes UP (slower) — SHOULD be flagged as regression."""
+        imp = Improvement(
+            name="test", id="imp-test-lat-reg",
+            baseline_output={"latency_p95_ms": 200.0},
+            candidate_output={"final_response": "hi", "latency_p95_ms": 800.0},
+            metadata={"agent": "hermes"},
+        )
+        result = gate3.verify(imp)
+        assert result.gate_name == GateName.GATE3
+        # 200→800ms is 4x slower — MUST be flagged (direction: higher latency is worse)
+        assert not result.passed, (
+            f"Latency 200→800 (4x slower) should be flagged: {result.reason}"
+        )
+        # And the description must NOT use the higher-is-better wording
+        assert "% of baseline" not in result.reason, (
+            f"Latency regression should use 'above baseline' wording, not 'X% of baseline': {result.reason}"
+        )
+
 
 # ═══════════════════════════════════════════════════════════════
 #  Gate5 — Release Audit

@@ -254,6 +254,29 @@ class ShellExecTool(Tool):
         if not cmd:
             return "Error: empty command"
 
+        # ── 路径沙箱：阻止目录穿越 + 系统敏感目录读取 ──
+        # shell=False + shlex.split 时 shlex 按 POSIX shell 词法划词，
+        # 不会误伤参数中合法的".."但这些 token 仍是 allow-list 命令的参数，
+        # 可被 cat/head/tail/grep/find 用来读 /etc/passwd、/proc/self/environ 等
+        # 系统敏感文件 → 必须显式拒绝。
+        _PROTECTED_PREFIXES = (
+            "/etc/", "/proc/", "/sys/", "/dev/", "/var/", "/root/",
+            "/etc", "/proc", "/sys", "/dev", "/var", "/root",
+        )
+        for token in shlex.split(cmd):
+            # 拒绝 ".." 路径段（任意位置）
+            if token == ".." or token.startswith("../") or "/../" in token or token.endswith("/.."):
+                return (
+                    f"Error: Path traversal detected — '{token}' contains '..'. "
+                    f"Only files within the workspace directory are allowed."
+                )
+            # 拒绝绝对路径直指受保护系统目录
+            if token in _PROTECTED_PREFIXES or token.startswith(_PROTECTED_PREFIXES):
+                return (
+                    f"Error: Access to system path '{token}' is blocked. "
+                    f"ShellExecTool is sandboxed to workspace files only."
+                )
+
         # 提取命令名（第一个词）
         cmd_name = cmd.split()[0].split("/")[-1] if cmd else ""
 

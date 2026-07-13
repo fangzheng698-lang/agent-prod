@@ -105,18 +105,24 @@ DANGEROUS_COMMAND_PATTERNS: list[str] = [
 
 
 def is_path_allowed(filepath: str) -> bool:
-    """检查文件路径是否在沙箱白名单内且不在黑名单中。"""
-    abs_path = os.path.abspath(os.path.expanduser(filepath))
+    """检查文件路径是否在沙箱白名单内且不在黑名单中。
 
-    # 黑名单检查
+    使用 os.path.realpath 解析符号链接，防止在白名单目录里 ln -s
+    黑名单目标（如 /etc/passwd、~/.ssh/id_rsa）来逃出沙箱。
+    """
+    abs_path = os.path.realpath(os.path.expanduser(filepath))
+
+    # 黑名单检查（同样用 realpath 解析黑名单路径，避免通过子目录
+    # 符号链接逃逸，例如 /var/log -> /etc）
     for black in _get_blacklist():
-        if abs_path.startswith(os.path.abspath(black)):
+        if abs_path == os.path.realpath(black) or \
+                abs_path.startswith(os.path.realpath(black) + os.sep):
             return False
 
     # 白名单检查
     for white in _get_whitelist():
-        white_abs = os.path.abspath(white)
-        if abs_path.startswith(white_abs):
+        white_abs = os.path.realpath(white)
+        if abs_path == white_abs or abs_path.startswith(white_abs + os.sep):
             return True
 
     return False
@@ -246,6 +252,10 @@ class ToolExecutor:
         if len(code) > 100_000:
             return {"success": False, "error": "代码超过 100KB 限制"}
         # 在受限 namespace 中执行，禁止危险操作
+        # 经典 Python 沙箱逃逸通过 magic 属性链完成，不依赖 import/eval/open
+        # 在源码中出现：
+        #   __subclasses__ / __globals__ / __code__ / __builtins__
+        # 对 exec(code, safe_builtins) 构成逃逸风险，一律拒绝
         forbidden_imports = [
             r"\bimport\s+os\b", r"\bimport\s+subprocess\b",
             r"\bimport\s+shutil\b", r"\bimport\s+socket\b",
@@ -254,6 +264,12 @@ class ToolExecutor:
             r"\bbuiltins\b",
             r"__import__\s*\(", r"exec\s*\(", r"eval\s*\(",
             r"compile\s*\(", r"open\s*\(", r"file\s*\(",
+            # 沙箱逃逸 magic 属性链（__class__ 本身可能合法，但 subclasses/
+            # globals/code 几乎只在逃逸场景使用）
+            r"__subclasses__\s*\(", r"__globals__\s*",
+            r"__code__\s*", r"__builtins__\s*",
+            r"\.func_globals", r"\.f_back",
+            r"__reduce__\s*",
         ]
         for fi in forbidden_imports:
             if re.search(fi, code):

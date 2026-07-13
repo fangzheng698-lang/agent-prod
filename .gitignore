@@ -5,3 +5,10 @@ __pycache__/
 data/
 *.egg-info/
 .pytest_cache/
+
+# Runtime logs / temp backfill artifacts (track committed scripts/, not root)
+logs/
+*.log
+backfill_final.log
+server_restart.log
+uv.lock

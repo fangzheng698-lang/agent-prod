@@ -21,8 +21,6 @@ from typing import Any
 class AgentType(str, Enum):
     """agent-prod 已知的 agent 类型。adapter 注册表键。"""
 
-# Copyright (c) 2026 fang.zheng
-# License: MIT (see LICENSE file in root)
     HERMES = "hermes"
     CLAUDE_CODE = "claude-code"
     CODEX = "codex"

@@ -104,8 +104,6 @@ def _log_gate(gate_name: str, passed: bool, duration_ms: float,
               improvement_id: str, details: dict | None = None):
     """结构化日志记录门禁结果"""
 
-# Copyright (c) 2026 fang.zheng
-# License: MIT (see LICENSE file in root)
     event = {
         "event": "gate_executed",
         "gate": gate_name,
@@ -414,6 +412,13 @@ class QualityGateEngine:
     def _write_flywheel_log(self, improvement: Improvement, duration_ms: float, passed: bool) -> None:
         if self._flywheel is None:
             return
+        # 提取候选 trace 真实指标 — 供 Gate3 自适应引擎按真实 latency/success 训练
+        cd = improvement.candidate_output or {}
+        trace_metrics = {}
+        for key in ("latency_p95_ms", "latency_ms", "success_rate", "token_efficiency", "error_rate"):
+            v = cd.get(key)
+            if isinstance(v, (int, float)) and v > 0:
+                trace_metrics[key] = float(v)
         self._flywheel.log_execution(
             run_id=improvement.id,
             session_id=improvement.metadata.get("session_id", improvement.id),
@@ -424,6 +429,7 @@ class QualityGateEngine:
             duration_ms=duration_ms,
             gate_pass=passed,
             gate_status="production" if passed else "rejected",
+            trace_metrics=trace_metrics or None,
         )
 
     def _run_with_timeout(self, gate_name: str, verify_fn, improvement: Improvement,

@@ -20,8 +20,6 @@ logger = logging.getLogger(__name__)
 class GrayMetrics(BaseModel):
     """灰度阶梯指标"""
 
-# Copyright (c) 2026 fang.zheng
-# License: MIT (see LICENSE file in root)
     stage: int
     traffic_pct: int
     label: str

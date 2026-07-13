@@ -120,6 +120,14 @@ def parse_qclaw_session(
         total_tokens_prompt = max(1, total_chars // 4)
         total_tokens_completion = total_tokens_prompt
 
+    # Cap 估算值以避免冲击下游 schema 上限（gate1 schema 要求 < 100M）
+    # 真实 token 不会超过 10M，估算若超过说明是异常 session
+    _MAX_TOKEN_CAP = 5_000_000
+    if total_tokens_prompt > _MAX_TOKEN_CAP:
+        total_tokens_prompt = _MAX_TOKEN_CAP
+    if total_tokens_completion > _MAX_TOKEN_CAP:
+        total_tokens_completion = _MAX_TOKEN_CAP
+
     # 如果 duration 也是 0，用时间戳差估算
     if total_duration_ms == 0:
         total_duration_ms = _compute_duration(events)

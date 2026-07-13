@@ -29,8 +29,6 @@ logger = logging.getLogger(__name__)
 class AlertPayload:
     """Data carried by a gate-failure alert."""
 
-# Copyright (c) 2026 fang.zheng
-# License: MIT (see LICENSE file in root)
     agent_type: str = ""
     agent_version: str = ""
     session_id: str = ""

@@ -109,11 +109,17 @@ class ApprovalQueue:
     """
 
     def __init__(self, webhook_fn: WebhookFn | None = None,
-                 ttl_seconds: int = 86400):
+                 ttl_seconds: int = 86400,
+                 decided_retention: int = 500):
         self._records: dict[str, ApprovalRecord] = {}
         self._by_improvement: dict[str, str] = {}  # improvement_id -> approval_id
         self._webhook_fn = webhook_fn
         self._ttl_seconds = ttl_seconds
+        # Cap on resolved (approved/rejected/expired) records kept in memory
+        # after the decision is made — pending ones are never evicted; the
+        # bounded dict keeps long-running processes from leaking memory while
+        # still serving recent lookups via get()/get_by_improvement().
+        self._decided_retention = decided_retention
 
     # ── Internal helpers ──
 
@@ -130,6 +136,22 @@ class ApprovalQueue:
             rec.decided_at = datetime.now(UTC)
             rec.decision_reason = "auto-expired (TTL)"
             logger.info("Approval %s expired after %ds TTL", rid, self._ttl_seconds)
+            # Evict from index so the dict doesn't grow unbounded;
+            # a full restart re-hydrates pending ones from the repository.
+            self._by_improvement.pop(rec.improvement_id, None)
+            del self._records[rid]
+        # Drop oldest decided records beyond retention cap (pending always kept)
+        decided = sorted(
+            (r for r in self._records.values() if not r.is_pending),
+            key=lambda r: r.decided_at or r.requested_at,
+        )
+        if len(decided) > self._decided_retention:
+            evict = decided[: len(decided) - self._decided_retention]
+            for rec in evict:
+                rid = rec.approval_id
+                if self._by_improvement.get(rec.improvement_id) == rid:
+                    self._by_improvement.pop(rec.improvement_id, None)
+                self._records.pop(rid, None)
 
     # ── Public API ──
 

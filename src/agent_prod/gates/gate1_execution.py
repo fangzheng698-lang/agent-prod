@@ -25,6 +25,7 @@ from .models import (
     RollbackLevel,
     RollbackPlan,
 )
+from .interface import GatePlugin
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +36,7 @@ class ExecutionOutput(BaseModel, strict=False):
     final_response: str = Field(min_length=1, max_length=100_000)
     confidence: float = Field(ge=0.0, le=1.0, default=0.95)
     tools_used: list[str] = Field(max_length=50, default_factory=list)
-    token_count: int = Field(ge=0, lt=10_000_000, default=0)  # 上限由 budget 控制，schema 只做合理性检查
+    token_count: int = Field(ge=0, lt=100_000_000, default=0)  # 上限 1 亿，由预算控制，schema 只做合理性检查
     warnings: list[str] = Field(default_factory=list, max_length=20)
 
     @field_validator("final_response")
@@ -94,8 +95,11 @@ class Gate1Config(BaseModel):
                        if k in cls.model_fields})
 
 
-class Gate1Execution:
+class Gate1Execution(GatePlugin):
     """执行验证门"""
+
+    name = GateName.GATE1
+    rollback_level = RollbackLevel.L1
 
     def __init__(self, config: Gate1Config | None = None):
         self.config = config or Gate1Config()
@@ -175,6 +179,11 @@ class Gate1Execution:
             success=True,
         )
         improvement.candidate_output = {}
+
+    @classmethod
+    def from_config(cls, config: dict, name: GateName) -> Gate1Execution:
+        gate1_cfg = (config or {}).get("gates", {}).get("gate1", {})
+        return cls(config=Gate1Config(**gate1_cfg))
 
 # ── GatePlugin registration ──────────────────────────────
 from .interface import register_gate

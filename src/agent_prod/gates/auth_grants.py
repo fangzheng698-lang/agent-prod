@@ -123,7 +123,9 @@ class AuthGrantStore:
         )
         self._grants[gid] = grant
         self._save()
-        logger.info("Auth grant issued: %s %s/%s → %s", gid, agent_type, tool_name, granted_by)
+        # grant_id 是 dangerous-tool 的 bearer 凭证 — 在 log 中脱敏，只打前 8 字符
+        logger.info("Auth grant issued: %s*** %s/%s → %s",
+                    gid[:8], agent_type, tool_name, granted_by)
         return grant
 
     def check(self, agent_type: str, tool_name: str) -> AuthGrant | None:

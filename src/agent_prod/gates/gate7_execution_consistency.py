@@ -20,7 +20,7 @@ import time
 import uuid
 from typing import Any
 
-from .interface import register_gate
+from .interface import GatePlugin, register_gate
 from .models import GateName, GateResult, Improvement, RollbackLevel, RollbackPlan
 from .reasoning import EvidenceSource, EvidenceType, ReasoningStep
 
@@ -68,16 +68,17 @@ def apply_gate7_reasoning(improvement, result, deviations, mode):
     improvement.reasoning_chain.add_step(step)
 
 
-class Gate7ExecutionConsistency:
+class Gate7ExecutionConsistency(GatePlugin):
     """执行一致性门 — 计划 vs 实际对比
 
-# Copyright (c) 2026 fang.zheng
-# License: MIT (see LICENSE file in root)
 
     支持 observe/enforce 双模式（与 Gate0 一致）：
       - observe（默认）: 发现偏离只记录不阻断，passed=True
       - enforce: 发现 critical 偏离直接拒绝
     """
+
+    name = GateName.GATE7
+    rollback_level = RollbackLevel.L1
 
     def __init__(self, config=None, raw_config=None, repository=None):
         self.config = config or {}
@@ -312,6 +313,10 @@ class Gate7ExecutionConsistency:
             executed_at=None,
             success=False,
         )
+
+    @classmethod
+    def from_config(cls, config: dict, name: GateName) -> Gate7ExecutionConsistency:
+        return cls(config=None, raw_config=config)
 
 
 # ── GatePlugin registration ──────────────────────────────

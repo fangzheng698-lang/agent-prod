@@ -29,8 +29,9 @@ from dataclasses import dataclass, field
 from typing import Any
 from urllib import request
 
-from .models import GateName, GateResult, Improvement
+from .models import GateName, GateResult, Improvement, RollbackLevel
 from .reasoning import EvidenceSource, EvidenceType, ReasoningStep
+from .interface import GatePlugin
 
 logger = logging.getLogger(__name__)
 
@@ -85,12 +86,15 @@ class Gate6Config:
         )
 
 
-class Gate6AnswerQuality:
+class Gate6AnswerQuality(GatePlugin):
     """答案正确性质量门。
 
     评估 agent 输出与期望答案之间的吻合度。
     支持三种评估器，通过 Gate6Config 配置。
     """
+
+    name = GateName.GATE6
+    rollback_level = RollbackLevel.L1
 
     def __init__(self, config: Gate6Config | None = None):
         self.config = config or Gate6Config()
@@ -99,11 +103,15 @@ class Gate6AnswerQuality:
 
     def rollback(self, improvement: Improvement) -> None:
         """Gate6 回滚策略：无副作用，无需回滚。
-        
+
         Gate6 仅评估答案质量，不产生副作用。
         如果答案质量不达标，拒绝上线即可，无需清理操作。
         """
         pass
+
+    @classmethod
+    def from_config(cls, config: dict, name: GateName) -> Gate6AnswerQuality:
+        return cls(config=Gate6Config.from_yaml(config))
 
     def verify(self, improvement: Improvement) -> GateResult:
         start = time.time()
@@ -902,3 +910,9 @@ def _checklist_fix_hints() -> dict[str, str]:
         "code_correct": "代码片段需可运行。提供完整的 import 和上下文，避免伪代码",
         "appropriate_tone": "检查语气是否专业、尊重。避免居高临下或不耐烦的表述",
     }
+
+
+# ── Register as a GatePlugin ───────────────────────────
+from .interface import register_gate
+
+register_gate(GateName.GATE6, Gate6AnswerQuality)

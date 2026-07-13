@@ -187,7 +187,10 @@ class CrossSessionMemory:
 
 
 def _auto_key(n: int) -> str:
-    """生成唯一 auto key。"""
-    import hashlib
-    import time
-    return hashlib.md5(f"{time.time()}_{n}".encode()).hexdigest()[:8]
+    """生成唯一 auto key。
+
+    用 secrets.token_hex(4) 生成 8 字符随机串（密码学安全），
+    不再用 md5(time.time()) —— 后者可预测且微秒窗口内同 n 会碰撞。
+    """
+    import secrets
+    return secrets.token_hex(4)

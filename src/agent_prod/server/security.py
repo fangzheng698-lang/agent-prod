@@ -17,6 +17,7 @@ Usage:
 
 from __future__ import annotations
 
+import hmac
 import logging
 import threading
 import time
@@ -117,14 +118,14 @@ def auth_middleware_factory(
     """
 
     async def auth_middleware(request: Request, call_next: Callable) -> Response:
-        if auth_required and api_key and request.url.path.startswith("/v1/"):
+        if auth_required and api_key and (request.url.path.startswith("/v1/") or request.url.path.startswith("/v2/")):
             auth_header = request.headers.get("Authorization", "")
             if not auth_header.startswith("Bearer "):
                 return JSONResponse(
                     status_code=401,
                     content={"error": "missing_authorization", "detail": "Authorization: Bearer <key> required"},
                 )
-            if auth_header[7:] != api_key:
+            if not hmac.compare_digest(auth_header[7:], api_key):
                 return JSONResponse(
                     status_code=403,
                     content={"error": "invalid_api_key", "detail": "API key rejected"},
@@ -150,7 +151,7 @@ def rate_limit_middleware_factory(
     async def rate_limit_middleware(request: Request, call_next: Callable) -> Response:
         if not _rate_limiter.enabled:
             return await call_next(request)
-        if not request.url.path.startswith("/v1/"):
+        if not (request.url.path.startswith("/v1/") or request.url.path.startswith("/v2/")):
             return await call_next(request)
 
         if not _rate_limiter.allow(request.url.path):

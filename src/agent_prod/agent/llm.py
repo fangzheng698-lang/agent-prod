@@ -35,10 +35,10 @@ class LLMClient:
 
     def __init__(self, api_key: str, base_url: str, model: str):
         self.model = model
+        self._api_key = api_key
         self._client = httpx.AsyncClient(
             base_url=base_url.rstrip("/"),
             headers={
-                "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
             },
             timeout=httpx.Timeout(connect=10, read=60, write=30, pool=10),
@@ -59,8 +59,21 @@ class LLMClient:
         if tools:
             body["tools"] = tools
 
-        resp = await self._client.post("/chat/completions", json=body)
-        resp.raise_for_status()
+        resp = await self._client.post(
+            "/chat/completions", json=body,
+            auth=httpx.BearerAuth(self._api_key),
+        )
+        try:
+            resp.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            # httpx HTTPStatusError encodes the request (incl. Authorization
+            # header) in str(e). Strip it before re-raising so the API key
+            # never appears in tracebacks/logs.
+            raise httpx.HTTPStatusError(
+                message=f"upstream LLM {resp.status_code}: {self._redact(resp.text)}",
+                request=httpx.Request("POST", "REDACTED", headers={}),
+                response=resp,
+            ) from e
         data = resp.json()
 
         choice = data["choices"][0]
@@ -90,3 +103,19 @@ class LLMClient:
 
     async def close(self):
         await self._client.aclose()
+
+    @staticmethod
+    def _redact(body: str, max_len: int = 200) -> str:
+        """脱敏可能含 API key 的响应体：只返回前 max_len 字符且用 *** 替换可能的 key。
+
+        上游 LLM 错误响应有时会反射回 request（包括 Authorization header）。
+        这里暴力截断 + 替换所有 Bearer/Api-Key 模式。
+        """
+        import re as _re
+        redacted = _re.sub(
+            r"Bearer\s+\S+" , "Bearer ***",
+            _re.sub(r"sk-[A-Za-z0-9]{20,}", "sk-***", body),
+        )
+        if len(redacted) > max_len:
+            redacted = redacted[:max_len] + "... (truncated)"
+        return redacted
