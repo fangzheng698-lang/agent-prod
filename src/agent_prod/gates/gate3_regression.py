@@ -487,6 +487,12 @@ class Gate3Regression(GatePlugin):
         喂入同 agent 的历史 latency / success_rate / token_efficiency，
         校准 EWMA 动态阈值带。
         """
+        # latency 不可能超过 pipeline 真实耗时的 N 倍。qclaw_parser 在缺少
+        # 真实 timing 时用时间戳跨度估算，可能产出虚假的 500K+ms 延迟（同条
+        # 记录的 duration_ms 通常只有几毫秒到几百毫秒）。比值上界比绝对硬上限
+        # 更自适应——大 session 和小 session 用同一个 ratio 就够了。
+        _RATIO_CAP = 1000.0
+
         if not self._flywheel:
             return
         try:
@@ -510,7 +516,7 @@ class Gate3Regression(GatePlugin):
         self._adaptive_engine = AdaptiveGateEngine(
             gate_name="gate3",
             metrics=["latency_ms", "success_rate", "token_efficiency"],
-            window_size=50, sigma_mult=3.0, min_samples=5,
+            window_size=50, sigma_mult=2.0, min_samples=5,
             min_widths={"latency_ms": 500.0},
         )
 
@@ -527,7 +533,18 @@ class Gate3Regression(GatePlugin):
                 tm = {}
             lat = tm.get("latency_p95_ms") or tm.get("latency_ms")
             if isinstance(lat, (int, float)) and lat > 0:
-                latencies.append(float(lat))
+                # 物理合理性检查：qclaw_parser 在 session 时间戳跨度巨大时
+                # 会产出虚假的高 latency（如 500K+ms 但 duration 仅 5ms）。
+                # 同一条记录的 duration_ms 才是真实 pipeline 耗时，
+                # latency 不可能超过它的 1000 倍。
+                if r.duration_ms > 0 and lat > r.duration_ms * _RATIO_CAP:
+                    logger.debug(
+                        "Gate3: skipping inflated latency %.0fms "
+                        "(duration=%.0fms, ratio=%.0f)",
+                        lat, r.duration_ms, lat / r.duration_ms,
+                    )
+                else:
+                    latencies.append(float(lat))
             sr = tm.get("success_rate")
             if isinstance(sr, (int, float)) and 0 <= sr <= 1:
                 success_rates.append(float(sr))
@@ -536,6 +553,10 @@ class Gate3Regression(GatePlugin):
                 token_effs.append(float(te))
 
         # IQR 离群值过滤（仅对 latency — 跨数量级最容易污染）
+        # q3 + 1.5*IQR 自动适应数据分布。前置的 duration_ms 比值检查
+        # （_RATIO_CAP=1000）已经把解析器伪迹过滤掉了，这里只需处理
+        # 剩余 distribution 层面的极端值。
+
         def _iqr_filter(values: list[float]) -> list[float]:
             if len(values) < 4:
                 return list(values)
@@ -544,7 +565,7 @@ class Gate3Regression(GatePlugin):
             q1 = s[n // 4]
             q3 = s[(3 * n) // 4]
             iqr = q3 - q1
-            lo, hi = q1 - 3.0 * iqr, q3 + 3.0 * iqr
+            lo, hi = q1 - 1.5 * iqr, q3 + 1.5 * iqr
             return [v for v in values if lo <= v <= hi]
 
         clean_latencies = _iqr_filter(latencies)
