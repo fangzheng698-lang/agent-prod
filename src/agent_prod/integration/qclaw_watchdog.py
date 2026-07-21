@@ -112,10 +112,18 @@ class QClawWatchdog:
 
         try:
             while self._running:
-                self._poll()
+                try:
+                    self._poll()
+                except Exception as e:
+                    # 文件系统 / socket / 解析临时异常 — 不自杀，等下次 poll
+                    self._error_count += 1
+                    logger.warning("Poll cycle failed (continuing): %s", e, exc_info=True)
                 time.sleep(self.poll_interval)
         except KeyboardInterrupt:
             pass
+        except Exception as e:
+            # 外部不可恢复异常 — 记录后 exit
+            logger.exception("Watchdog fatal error, exiting: %s", e)
         finally:
             self._running = False
             logger.info(
